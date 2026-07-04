@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 /// @notice Interface toi thieu cua Stork Oracle (da xac nhan tu docs.stork.network)
 interface IStork {
     struct TemporalNumericValue {
-        uint64 timestampNs;   // timestamp nano-giay
+        uint64 timestampNs; // timestamp nano-giay
         int192 quantizedValue; // gia, luon scale 1e18
     }
     function getTemporalNumericValueUnsafeV1(bytes32 id) external view returns (TemporalNumericValue memory value);
@@ -18,8 +18,8 @@ contract PriceOracle is Ownable {
     IStork public stork;
     bytes32 public feedId; // Feed ID cho cap EURC/USD tren Stork asset registry
 
-    uint256 public maxStaleness = 300;      // 5 phut (giay) - gia qua thoi han nay bi tu choi
-    uint256 public maxDeviationBps = 2000;  // 20% - dung theo spec circuit breaker
+    uint256 public maxStaleness = 300; // 5 phut (giay) - gia qua thoi han nay bi tu choi
+    uint256 public maxDeviationBps = 2000; // 20% - dung theo spec circuit breaker
     uint256 public constant BPS_DENOMINATOR = 10_000;
 
     uint256 public lastAcceptedPrice; // scale 1e18
@@ -68,9 +68,7 @@ contract PriceOracle is Ownable {
         require(block.timestamp - priceTimestamp <= maxStaleness, "Oracle: gia da cu (stale)");
 
         if (lastAcceptedPrice > 0) {
-            uint256 diff = rawPrice > lastAcceptedPrice
-                ? rawPrice - lastAcceptedPrice
-                : lastAcceptedPrice - rawPrice;
+            uint256 diff = rawPrice > lastAcceptedPrice ? rawPrice - lastAcceptedPrice : lastAcceptedPrice - rawPrice;
             uint256 deviationBps = (diff * BPS_DENOMINATOR) / lastAcceptedPrice;
             require(deviationBps <= maxDeviationBps, "Oracle: gia lech qua nguong cho phep");
         }

@@ -22,9 +22,9 @@ contract LendingPool is Ownable, Pausable, ReentrancyGuard {
     uint256 public constant BPS_DENOMINATOR = 10_000;
     uint256 public constant HF_PRECISION = 1e18;
 
-    uint256 public maxLtvBps = 7_500;            // 75% - LTV toi da khi vay moi
+    uint256 public maxLtvBps = 7_500; // 75% - LTV toi da khi vay moi
     uint256 public liquidationThresholdBps = 8_330; // 83.3% - nguong bi thanh ly
-    uint256 public liquidationBonusBps = 500;     // 5% - thuong cho nguoi thanh ly
+    uint256 public liquidationBonusBps = 500; // 5% - thuong cho nguoi thanh ly
 
     // Lai suat vay, moi giay, scale 1e18 (admin dieu chinh theo utilization o phase sau)
     mapping(address => uint256) public borrowRatePerSecond;
@@ -55,7 +55,13 @@ contract LendingPool is Ownable, Pausable, ReentrancyGuard {
     event CollateralWithdrawn(address indexed user, address indexed asset, uint256 amount);
     event Borrowed(address indexed user, address indexed asset, uint256 amount);
     event Repaid(address indexed user, address indexed asset, uint256 amount);
-    event Liquidated(address indexed user, address indexed liquidator, address indexed debtAsset, uint256 debtRepaid, uint256 collateralSeized);
+    event Liquidated(
+        address indexed user,
+        address indexed liquidator,
+        address indexed debtAsset,
+        uint256 debtRepaid,
+        uint256 collateralSeized
+    );
 
     constructor(address initialOwner, address usdcAddress, address eurcAddress, address oracleAddress)
         Ownable(initialOwner)
@@ -75,15 +81,23 @@ contract LendingPool is Ownable, Pausable, ReentrancyGuard {
         borrowRatePerSecond[asset] = rate;
     }
 
-    function setRiskParams(uint256 newMaxLtvBps, uint256 newLiqThresholdBps, uint256 newLiqBonusBps) external onlyOwner {
+    function setRiskParams(uint256 newMaxLtvBps, uint256 newLiqThresholdBps, uint256 newLiqBonusBps)
+        external
+        onlyOwner
+    {
         require(newMaxLtvBps < newLiqThresholdBps, "Max LTV phai nho hon nguong thanh ly");
         maxLtvBps = newMaxLtvBps;
         liquidationThresholdBps = newLiqThresholdBps;
         liquidationBonusBps = newLiqBonusBps;
     }
 
-    function pause() external onlyOwner { _pause(); }
-    function unpause() external onlyOwner { _unpause(); }
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
 
     // ---------------------------------------------------------------------
     // GIA QUY DOI (thong qua PriceOracle, gia EURC/USD scale 1e18)

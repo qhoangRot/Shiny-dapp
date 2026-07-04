@@ -13,7 +13,11 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 contract StakingVault is Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    enum Tier { Flexible, Growth, Diamond }
+    enum Tier {
+        Flexible,
+        Growth,
+        Diamond
+    }
 
     struct Position {
         address owner;
@@ -21,7 +25,7 @@ contract StakingVault is Ownable, Pausable, ReentrancyGuard {
         Tier tier;
         uint256 principal;
         uint256 startTime;
-        uint256 unlockTime;      // 0 neu la Flexible (khong khoa)
+        uint256 unlockTime; // 0 neu la Flexible (khong khoa)
         uint256 lastAccrualTime;
         uint256 accruedReward;
         bool withdrawn;
@@ -45,9 +49,13 @@ contract StakingVault is Ownable, Pausable, ReentrancyGuard {
     // KHONG duoc gop USDC va EURC vao chung 1 bien, vi 1 USDC != 1 EURC ve gia tri.
     mapping(address => uint256) public pendingInsuranceFund;
 
-    event Staked(uint256 indexed positionId, address indexed user, address asset, Tier tier, uint256 amount, uint256 unlockTime);
+    event Staked(
+        uint256 indexed positionId, address indexed user, address asset, Tier tier, uint256 amount, uint256 unlockTime
+    );
     event Withdrawn(uint256 indexed positionId, uint256 principal, uint256 reward);
-    event EmergencyWithdrawn(uint256 indexed positionId, uint256 principal, uint256 rewardPaid, uint256 rewardForfeited);
+    event EmergencyWithdrawn(
+        uint256 indexed positionId, uint256 principal, uint256 rewardPaid, uint256 rewardForfeited
+    );
     event RewardClaimed(uint256 indexed positionId, uint256 amount);
     event AssetSupported(address indexed asset, bool status);
     event RewardRateUpdated(address indexed asset, uint256 newRate);
@@ -73,8 +81,13 @@ contract StakingVault is Ownable, Pausable, ReentrancyGuard {
         tierBoostBps[tier] = boostBps;
     }
 
-    function pause() external onlyOwner { _pause(); }
-    function unpause() external onlyOwner { _unpause(); }
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
 
     /// @notice Chuyen quy bao hiem da tich luy sang contract InsuranceFund that (phase 2)
     function sweepInsuranceFund(address asset, address to) external onlyOwner {
@@ -199,11 +212,11 @@ contract StakingVault is Ownable, Pausable, ReentrancyGuard {
     ///      0-3 thang: 100% | 3-6 thang: 75% | 6-9 thang: 50% | 9-12 thang: 25% | 12+ thang: 0%
     ///      Tinh theo TON TAI CUA POSITION (startTime), khong phai theo tier lock duration.
     function _penaltyBpsForTimeHeld(uint256 timeHeld) internal pure returns (uint256) {
-        if (timeHeld < 90 days) return 10_000;   // 100%
-        if (timeHeld < 180 days) return 7_500;   // 75%
-        if (timeHeld < 270 days) return 5_000;   // 50%
-        if (timeHeld < 365 days) return 2_500;   // 25%
-        return 0;                                 // 0%
+        if (timeHeld < 90 days) return 10_000; // 100%
+        if (timeHeld < 180 days) return 7_500; // 75%
+        if (timeHeld < 270 days) return 5_000; // 50%
+        if (timeHeld < 365 days) return 2_500; // 25%
+        return 0; // 0%
     }
 
     /// @notice Rut som bat cu luc nao. Von goc LUON duoc tra 100%.

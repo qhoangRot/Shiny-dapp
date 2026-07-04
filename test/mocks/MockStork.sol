@@ -12,10 +12,7 @@ contract MockStork {
 
     /// @notice Ham test-only: dat gia thu cong. price phai scale 1e18 (vi du 1.08 USD = 1.08e18)
     function setPrice(bytes32 id, int192 price) external {
-        values[id] = TemporalNumericValue({
-            timestampNs: uint64(block.timestamp) * 1e9,
-            quantizedValue: price
-        });
+        values[id] = TemporalNumericValue({timestampNs: uint64(block.timestamp) * 1e9, quantizedValue: price});
     }
 
     function getTemporalNumericValueUnsafeV1(bytes32 id) external view returns (TemporalNumericValue memory) {
