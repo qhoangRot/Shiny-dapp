@@ -12,6 +12,12 @@ import "./oracle/PriceOracle.sol";
 /// @notice Cho vay/muon cheo tai san (USDC <-> EURC), tinh Health Factor theo portfolio,
 ///         lai suat tich luy lien tuc, thanh ly cong khai (ai cung goi duoc).
 /// @dev Phien ban MVP: collateral duoc deposit rieng (chua noi truc tiep voi StakingVault).
+
+/// @notice Interface toi thieu de LendingPool doc du lieu tu StakingVault
+interface IStakingVaultView {
+    function getTotalStakedByUser(address user, address asset) external view returns (uint256);
+}
+
 contract LendingPool is Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -32,6 +38,7 @@ contract LendingPool is Ownable, Pausable, ReentrancyGuard {
     address public usdc;
     address public eurc;
     PriceOracle public oracle; // Gia EURC/USD, dung de quy doi cheo USDC<->EURC
+    IStakingVaultView public stakingVault; // Doc so du dang stake, khong can user rut ra
 
     mapping(address => bool) public supportedAssets;
 
@@ -71,6 +78,27 @@ contract LendingPool is Ownable, Pausable, ReentrancyGuard {
         oracle = PriceOracle(oracleAddress);
         supportedAssets[usdcAddress] = true;
         supportedAssets[eurcAddress] = true;
+    }
+
+    function setStakingVault(address stakingVaultAddress) external onlyOwner {
+        stakingVault = IStakingVaultView(stakingVaultAddress);
+    }
+
+    /// @notice StakingVault goi ham nay TRUOC khi cho user emergencyWithdraw,
+    ///         de dam bao rut xong Health Factor van an toan (>= 1.0).
+    ///         Neu khong an toan, ham nay se revert, chan luon giao dich rut ben StakingVault.
+    function checkWithdrawSafety(address user, address asset, uint256 amountBeingWithdrawn) external {
+        uint256 debt = _totalDebtValueInUsdc(user);
+        if (debt == 0) return; // Khong vay gi ca, rut thoai mai
+
+        uint256 collateral = _totalCollateralValueInUsdc(user);
+        uint256 amountValueInUsdc = asset == eurc ? _convert(eurc, usdc, amountBeingWithdrawn) : amountBeingWithdrawn;
+
+        uint256 collateralAfterWithdraw = collateral > amountValueInUsdc ? collateral - amountValueInUsdc : 0;
+        uint256 adjustedCollateral = (collateralAfterWithdraw * liquidationThresholdBps) / BPS_DENOMINATOR;
+        uint256 hfAfter = (adjustedCollateral * HF_PRECISION) / debt;
+
+        require(hfAfter >= HF_PRECISION, "LendingPool: rut se lam Health Factor mat an toan");
     }
 
     // ---------------------------------------------------------------------
@@ -224,6 +252,17 @@ contract LendingPool is Ownable, Pausable, ReentrancyGuard {
         uint256 eurcCollateral = collateralBalance[user][eurc];
         if (eurcCollateral > 0) {
             total += _convert(eurc, usdc, eurcCollateral);
+        }
+
+        // Cong them so du dang stake trong StakingVault (neu da noi 2 contract)
+        if (address(stakingVault) != address(0)) {
+            uint256 stakedUsdc = stakingVault.getTotalStakedByUser(user, usdc);
+            total += stakedUsdc;
+
+            uint256 stakedEurc = stakingVault.getTotalStakedByUser(user, eurc);
+            if (stakedEurc > 0) {
+                total += _convert(eurc, usdc, stakedEurc);
+            }
         }
     }
 

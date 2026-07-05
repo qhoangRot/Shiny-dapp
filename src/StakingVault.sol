@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
+/// @notice Interface toi thieu de StakingVault goi nguoc sang LendingPool kiem tra Health Factor
+interface ILendingPoolView {
+    function checkWithdrawSafety(address user, address asset, uint256 amountBeingWithdrawn) external;
+}
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -49,6 +54,10 @@ contract StakingVault is Ownable, Pausable, ReentrancyGuard {
     // KHONG duoc gop USDC va EURC vao chung 1 bien, vi 1 USDC != 1 EURC ve gia tri.
     mapping(address => uint256) public pendingInsuranceFund;
 
+    // Dia chi LendingPool, dung de kiem tra Health Factor truoc khi cho emergencyWithdraw
+    // (chi ap dung neu user co dang vay tai LendingPool)
+    address public lendingPool;
+
     event Staked(
         uint256 indexed positionId, address indexed user, address asset, Tier tier, uint256 amount, uint256 unlockTime
     );
@@ -87,6 +96,21 @@ contract StakingVault is Ownable, Pausable, ReentrancyGuard {
 
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    function setLendingPool(address lendingPoolAddress) external onlyOwner {
+        lendingPool = lendingPoolAddress;
+    }
+
+    /// @notice Tong so tien mot user dang stake (tat ca position con active) cho 1 loai asset.
+    ///         LendingPool goi ham nay de tinh tai san the chap ma KHONG can user rut tien ra.
+    function getTotalStakedByUser(address user, address asset) external view returns (uint256 total) {
+        for (uint256 i = 1; i < nextPositionId; i++) {
+            Position storage p = positions[i];
+            if (p.owner == user && p.asset == asset && !p.withdrawn) {
+                total += p.principal;
+            }
+        }
     }
 
     /// @notice Chuyen quy bao hiem da tich luy sang contract InsuranceFund that (phase 2)
@@ -245,10 +269,11 @@ contract StakingVault is Ownable, Pausable, ReentrancyGuard {
             pendingInsuranceFund[p.asset] += rewardForfeited;
         }
 
-        // TODO (phase sau, khi tich hop LendingPool):
-        // Neu position dang duoc dung lam collateral cho khoan vay,
-        // phai kiem tra Health Factor sau khi rut van con >= nguong an toan
-        // truoc khi cho phep emergencyWithdraw (theo spec muc 3.3).
+        // Neu user co dang vay tai LendingPool, kiem tra Health Factor sau khi rut
+        // van phai an toan (>= 1.0), neu khong thi tu choi rut (dung theo spec muc 3.3)
+        if (lendingPool != address(0)) {
+            ILendingPoolView(lendingPool).checkWithdrawSafety(msg.sender, p.asset, principal);
+        }
 
         IERC20(p.asset).safeTransfer(msg.sender, principal + rewardToUser);
         emit EmergencyWithdrawn(positionId, principal, rewardToUser, rewardForfeited);
