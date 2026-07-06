@@ -1,14 +1,17 @@
 import { useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useReadContracts } from 'wagmi';
 import { CONTRACTS, stakingVaultAbi } from '../config/contracts';
+import { Reveal } from './Reveal';
+import { CountUp } from './CountUp';
 
 const SECONDS_PER_YEAR = 31_536_000n;
 const BPS_DENOMINATOR = 10_000n;
 
-function formatApy(baseRate: bigint, boostBps: bigint): string {
+function calcApy(baseRate: bigint, boostBps: bigint): number {
   const effectiveRate = baseRate + (baseRate * boostBps) / BPS_DENOMINATOR;
   const preciseAnnual = (Number(effectiveRate) * Number(SECONDS_PER_YEAR)) / 1e18;
-  return (preciseAnnual * 100).toFixed(2) + '%';
+  return preciseAnnual * 100;
 }
 
 function MarketsTable() {
@@ -53,9 +56,9 @@ function MarketsTable() {
           <tr key={row.symbol}>
             <td className="asset-cell">{row.symbol}</td>
             <td className="text-secondary">Coming soon</td>
-            <td>{formatApy(row.base, flexibleBoost)}</td>
-            <td>{formatApy(row.base, growthBoost)}</td>
-            <td>{formatApy(row.base, diamondBoost)}</td>
+            <td><CountUp value={calcApy(row.base, flexibleBoost)} suffix="%" /></td>
+            <td><CountUp value={calcApy(row.base, growthBoost)} suffix="%" /></td>
+            <td><CountUp value={calcApy(row.base, diamondBoost)} suffix="%" /></td>
           </tr>
         ))}
       </tbody>
@@ -92,7 +95,20 @@ function FaqSection() {
             <span>{item.q}</span>
             <span>{openIndex === i ? '−' : '+'}</span>
           </button>
-          {openIndex === i && <p className="faq-answer">{item.a}</p>}
+          <AnimatePresence initial={false}>
+            {openIndex === i && (
+              <motion.div
+                key="content"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.3, ease: 'easeInOut' }}
+                style={{ overflow: 'hidden' }}
+              >
+                <p className="faq-answer">{item.a}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       ))}
     </div>
@@ -102,26 +118,31 @@ function FaqSection() {
 export function LandingSections() {
   return (
     <div className="landing-sections">
-      <section id="markets-section" className="landing-section">
-        <h2>Markets</h2>
-        <MarketsTable />
-        <p className="markets-note">ⓘ APY values are estimated and may change based on lending demand.</p>
-      </section>
+      <Reveal>
+        <section id="markets-section" className="landing-section">
+          <h2>Markets</h2>
+          <MarketsTable />
+          <p className="markets-note">ⓘ APY values are estimated and may change based on lending demand.</p>
+        </section>
+      </Reveal>
 
-      <section id="faq-section" className="landing-section">
-        <h2>FAQs</h2>
-        <FaqSection />
-        <a
-          href="https://docs.arc.io"
-          target="_blank"
-          rel="noreferrer"
-          className="docs-link"
-          style={{ display: 'inline-block', marginTop: '16px' }}
-        >
-          Read Docs ↗
-        </a>
-      </section>
+      <Reveal>
+        <section id="faq-section" className="landing-section">
+          <h2>FAQs</h2>
+          <FaqSection />
+          <a
+            href="https://docs.arc.io"
+            target="_blank"
+            rel="noreferrer"
+            className="docs-link"
+            style={{ display: 'inline-block', marginTop: '16px' }}
+          >
+            Read Docs ↗
+          </a>
+        </section>
+      </Reveal>
 
+      <Reveal>
       <footer className="landing-footer">
         <div className="footer-links">
           <a href="https://docs.arc.io" target="_blank" rel="noreferrer">Arc Docs ↗</a>
@@ -155,6 +176,7 @@ export function LandingSections() {
         <p className="text-secondary footer-tagline">Revenue-sharing lending protocol — no reward token.</p>
         <p className="text-secondary footer-copyright">© Shiny — built on Arc Testnet</p>
       </footer>
+      </Reveal>
     </div>
   );
 }

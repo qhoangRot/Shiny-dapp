@@ -387,3 +387,144 @@ a.social-icon:hover {
 .footer-copyright {
   margin-top: 24px;
 }
+
+.hero-3d-wrapper {
+  position: relative;
+}
+
+.hero-3d-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.hero {
+  position: relative;
+  z-index: 1;
+}
+
+.hero-3d-canvas {
+  position: absolute;
+  inset: -20% -10%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.markets-table tbody tr {
+  transition: background-color 0.2s ease;
+  cursor: default;
+}
+
+.markets-table tbody tr:hover {
+  background-color: rgba(155, 93, 229, 0.08);
+}
+
+.glass-panel {
+  background: rgba(22, 18, 31, 0.55);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+}
+
+.how-it-works {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 60px 24px 90px;
+  position: relative;
+  z-index: 1;
+}
+
+.how-it-works__title {
+  font-size: 2rem;
+  text-align: center;
+  margin-bottom: 56px;
+}
+
+.how-it-works__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+  align-items: center;
+}
+
+@media (max-width: 720px) {
+  .how-it-works__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.tier-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 0;
+}
+
+.tier-box {
+  width: 100%;
+  max-width: 320px;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-width: 1.5px;
+  border-style: solid;
+}
+
+.tier-box__dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tier-box__label {
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+
+.tier-box__sublabel {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+}
+
+.stats-panel {
+  padding: 36px 32px;
+}
+
+.stats-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 0;
+}
+
+.stats-label {
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+}
+
+.stats-value {
+  font-family: var(--font-mono);
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.stats-value--hf {
+  color: var(--color-safe);
+}
+
+.stats-divider {
+  height: 1px;
+  background: var(--color-border);
+}
+
+.stats-caption {
+  margin-top: 20px;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}

@@ -4,6 +4,8 @@ import { useAccount } from 'wagmi';
 import { AnimatePresence, motion } from 'framer-motion';
 import logo from './assets/logo.png';
 import { LandingSections } from './components/LandingPage';
+import { Hero3D } from './components/Hero3D';
+import { HowItWorks } from './components/HowItWorks';
 import './App.css';
 
 const NAV_ITEMS = ['Dashboard', 'Markets', 'My Positions', 'Credit Score', 'Analytics'];
@@ -104,10 +106,12 @@ function PreConnectHero({
   onGoDashboard: () => void;
 }) {
   return (
-    <div className="hero">
-      <h1>Stake stablecoins. Earn real yield.</h1>
+    <div className="hero-3d-wrapper">
+      <Hero3D />
+      <div className="hero">
+        <h1>Stake stablecoins. Earn real yield.</h1>
       <p className="hero-subtext">
-        Revenue-sharing lending protocol — no reward token.
+        Revenue-sharing lending protocol.
       </p>
       <div className="hero-badges">
         <span className="badge">Supported: USDC, EURC</span>
@@ -119,8 +123,10 @@ function PreConnectHero({
           Go to Dashboard →
         </button>
       ) : (
-        <p className="hero-cta-hint">Connect your wallet to get started ↑</p>
+        <p className="hero-cta-hint">Get started ↑</p>
       )}
+      </div>
+      <HowItWorks />
     </div>
   );
 }
