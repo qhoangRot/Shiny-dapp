@@ -3,6 +3,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
 import { AnimatePresence, motion } from 'framer-motion';
 import logo from './assets/logo.png';
+import { LandingSections } from './components/LandingPage';
 import './App.css';
 
 const NAV_ITEMS = ['Dashboard', 'Markets', 'My Positions', 'Credit Score', 'Analytics'];
@@ -83,8 +84,10 @@ function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 16 }}
               transition={{ duration: 0.35, ease: 'easeOut' }}
+              style={{ width: '100%' }}
             >
               <PreConnectHero isConnected={isConnected} onGoDashboard={goApp} />
+              <LandingSections />
             </motion.div>
           )}
         </AnimatePresence>
