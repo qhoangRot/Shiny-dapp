@@ -6,7 +6,6 @@ export const CONTRACTS = {
   priceOracle: '0xacd441a57Df93A6b028788357de426682227970C',
 } as const;
 
-// Chi lay dung phan ham can dung, khong can copy toan bo ABI day du
 export const stakingVaultAbi = [
   {
     type: 'function',
@@ -21,5 +20,63 @@ export const stakingVaultAbi = [
     stateMutability: 'view',
     inputs: [{ name: '', type: 'uint8' }],
     outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'getTotalStakedByUser',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'user', type: 'address' },
+      { name: 'asset', type: 'address' },
+    ],
+    outputs: [{ name: 'total', type: 'uint256' }],
+  },
+] as const;
+
+export const lendingPoolAbi = [
+  {
+    type: 'function',
+    name: 'collateralBalance',
+    stateMutability: 'view',
+    inputs: [
+      { name: '', type: 'address' },
+      { name: '', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'loans',
+    stateMutability: 'view',
+    inputs: [
+      { name: '', type: 'address' },
+      { name: '', type: 'address' },
+    ],
+    outputs: [
+      { name: 'principal', type: 'uint256' },
+      { name: 'lastAccrualTime', type: 'uint256' },
+      { name: 'accruedInterest', type: 'uint256' },
+      { name: 'active', type: 'bool' },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'getHealthFactor',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'user', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const;
+
+export const priceOracleAbi = [
+  {
+    type: 'function',
+    name: 'viewPrice',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [
+      { name: 'price', type: 'uint256' },
+      { name: 'timestamp', type: 'uint256' },
+    ],
   },
 ] as const;

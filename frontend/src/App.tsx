@@ -6,6 +6,7 @@ import logo from './assets/logo.png';
 import { LandingSections } from './components/LandingPage';
 import { Hero3D } from './components/Hero3D';
 import { HowItWorks } from './components/HowItWorks';
+import { Dashboard } from './components/Dashboard';
 import './App.css';
 
 const NAV_ITEMS = ['Dashboard', 'Markets', 'My Positions', 'Credit Score', 'Analytics'];
@@ -77,7 +78,7 @@ function App() {
               transition={{ duration: 0.35, ease: 'easeOut' }}
               style={{ width: '100%', display: 'flex', justifyContent: 'center' }}
             >
-              <DashboardPlaceholder />
+              <Dashboard />
             </motion.div>
           ) : (
             <motion.div
@@ -130,17 +131,4 @@ function PreConnectHero({
     </div>
   );
 }
-
-function DashboardPlaceholder() {
-  return (
-    <div className="dashboard-placeholder">
-      <h2>Dashboard</h2>
-      <p className="text-secondary">Welcome back. Here's your portfolio overview.</p>
-      <p className="text-secondary" style={{ marginTop: '2rem' }}>
-        (Đang xây dựng — dữ liệu thật từ contract sẽ hiển thị ở đây trong bước tiếp theo)
-      </p>
-    </div>
-  );
-}
-
 export default App;
