@@ -29,7 +29,7 @@ export function BorrowDrawer({ open, onClose }: { open: boolean; onClose: () => 
   const numericAmount = Number(amount);
   const amountWei = amount && !isNaN(numericAmount) && numericAmount > 0 ? parseUnits(amount, 6) : 0n;
 
-  const { data, refetch } = useReadContracts({
+  const { data } = useReadContracts({
     contracts: address
       ? [
           { address: CONTRACTS.lendingPool, abi: lendingPoolAbi, functionName: 'collateralBalance', args: [address, CONTRACTS.usdc] },
