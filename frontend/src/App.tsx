@@ -1,20 +1,33 @@
 import { useEffect, useState } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, type Variants } from 'framer-motion';
 import logo from './assets/logo.png';
 import { LandingSections } from './components/LandingPage';
-import { Hero3D } from './components/Hero3D';
 import { HowItWorks } from './components/HowItWorks';
 import { Dashboard } from './components/Dashboard';
+import { LandingBackground } from './components/LandingBackground';
+import { SmoothScroll } from './components/SmoothScroll';
 import './App.css';
 
 const NAV_ITEMS = ['Dashboard', 'Markets', 'My Positions', 'Credit Score', 'Analytics'];
 
+const heroContainerVariants: Variants = {
+  hidden: {},
+  visible: {
+    transition: { staggerChildren: 0.15, delayChildren: 0.1 },
+  },
+};
+
+const heroItemVariants: Variants = {
+  hidden: { opacity: 0, y: 30 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.8, ease: 'easeOut' } },
+};
+
 function App() {
   const { isConnected } = useAccount();
   const [view, setView] = useState<'landing' | 'app'>('landing');
-
+  const showDashboard = isConnected && view === 'app';
   useEffect(() => {
     if (isConnected) setView('app');
   }, [isConnected]);
@@ -22,8 +35,7 @@ function App() {
   const goLanding = () => setView('landing');
   const goApp = () => setView('app');
 
-  const showDashboard = isConnected && view === 'app';
-
+  
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -89,8 +101,11 @@ function App() {
               transition={{ duration: 0.35, ease: 'easeOut' }}
               style={{ width: '100%' }}
             >
-              <PreConnectHero isConnected={isConnected} onGoDashboard={goApp} />
-              <LandingSections />
+              <LandingBackground />
+              <SmoothScroll>
+                <PreConnectHero isConnected={isConnected} onGoDashboard={goApp} />
+                <LandingSections />
+              </SmoothScroll>
             </motion.div>
           )}
         </AnimatePresence>
@@ -107,26 +122,41 @@ function PreConnectHero({
   onGoDashboard: () => void;
 }) {
   return (
-    <div className="hero-3d-wrapper">
-      <Hero3D />
-      <div className="hero">
-        <h1>Stake stablecoins. Earn real yield.</h1>
-      <p className="hero-subtext">
-        Revenue-sharing lending protocol.
-      </p>
-      <div className="hero-badges">
-        <span className="badge">Supported: USDC, EURC</span>
-        <span className="badge badge--accent">Live on Arc Testnet</span>
-      </div>
-
-      {isConnected ? (
-        <button className="cta-button" onClick={onGoDashboard}>
-          Go to Dashboard →
-        </button>
-      ) : (
-        <p className="hero-cta-hint">Get started ↑</p>
-      )}
-      </div>
+    <div>
+      <motion.div
+        className="hero"
+        variants={heroContainerVariants}
+        initial="hidden"
+        animate="visible"
+      >
+        <motion.div className="hero-badge" variants={heroItemVariants}>
+          <img src={logo} alt="" className="hero-badge__logo" />
+          <span>Shiny</span>
+        </motion.div>
+        <motion.h1 variants={heroItemVariants}>Stake and earn real yield</motion.h1>
+        <motion.p className="hero-subtext" variants={heroItemVariants}>
+          Revenue - sharing lending protocol
+        </motion.p>
+        <motion.div className="hero-badges" variants={heroItemVariants}>
+          <span className="badge badge--blue">Supported: USDC, EURC</span>
+          <span className="badge badge--accent">Live on Arc Testnet</span>
+        </motion.div>
+        {isConnected ? (
+          <motion.button
+            className="cta-button"
+            onClick={onGoDashboard}
+            variants={heroItemVariants}
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.97 }}
+          >
+            Go to Dashboard →
+          </motion.button>
+        ) : (
+          <motion.p className="hero-cta-hint" variants={heroItemVariants}>
+            Get started ↑
+          </motion.p>
+        )}
+      </motion.div>
       <HowItWorks />
     </div>
   );

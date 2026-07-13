@@ -1,63 +1,58 @@
 import { Canvas, useFrame } from '@react-three/fiber';
-import { Float, MeshDistortMaterial, Sparkles } from '@react-three/drei';
+import { Float, useTexture } from '@react-three/drei';
 import { useRef } from 'react';
-import type { Mesh } from 'three';
+import type { Group } from 'three';
+import usdcLogo from '../assets/usdc-logo.png';
+import eurcLogo from '../assets/eurc-logo.png';
 
-function HexPrism({
-  position,
-  scale,
-  speed,
-  color,
-}: {
+type TokenCoinProps = {
   position: [number, number, number];
   scale: number;
   speed: number;
   color: string;
-}) {
-  const meshRef = useRef<Mesh>(null);
+  logoSrc: string;
+};
+
+function TokenCoin({ position, scale, speed, color, logoSrc }: TokenCoinProps) {
+  const spinRef = useRef<Group>(null);
+  const logoTexture = useTexture(logoSrc);
 
   useFrame((_, delta) => {
-    if (meshRef.current) {
-      meshRef.current.rotation.x += delta * speed * 0.25;
-      meshRef.current.rotation.y += delta * speed * 0.18;
+    if (spinRef.current) {
+      spinRef.current.rotation.y += delta * speed * 0.15;
     }
   });
 
   return (
-    <Float speed={speed} rotationIntensity={0.5} floatIntensity={1.8}>
-      <mesh ref={meshRef} position={position} scale={scale}>
-        <cylinderGeometry args={[1, 1, 0.6, 6]} />
-        <MeshDistortMaterial
-          color={color}
-          emissive={color}
-          emissiveIntensity={0.35}
-          roughness={0.15}
-          metalness={0.7}
-          distort={0.18}
-          speed={1.6}
-        />
-      </mesh>
+    <Float speed={speed * 0.6} rotationIntensity={0.08} floatIntensity={0.8}>
+      <group position={position} scale={scale} rotation={[Math.PI / 2, 0, 0]}>
+        <group ref={spinRef}>
+          <mesh>
+            <cylinderGeometry args={[1, 1, 0.14, 96]} />
+            <meshStandardMaterial attach="material-0" color={color} metalness={0.3} roughness={0.6} />
+            <meshStandardMaterial attach="material-1" map={logoTexture} metalness={0.2} roughness={0.6} />
+            <meshStandardMaterial attach="material-2" map={logoTexture} metalness={0.2} roughness={0.6} />
+          </mesh>
+        </group>
+      </group>
     </Float>
   );
 }
 
-export function Hero3D() {
+export function Hero3D({ onReady }: { onReady?: () => void }) {
   return (
-    <div className="hero-3d-canvas">
-      <Canvas camera={{ position: [0, 0, 10], fov: 50 }}>
-        <ambientLight intensity={0.45} />
-        <pointLight position={[6, 6, 6]} intensity={1.4} color="#B57DEE" />
-        <pointLight position={[-6, -4, -4]} intensity={0.8} color="#4FD1C5" />
-        <pointLight position={[0, 4, -8]} intensity={0.6} color="#9B5DE5" />
+    <Canvas
+      camera={{ position: [0, 0, 9], fov: 48 }}
+      dpr={[1, 1.5]}
+      gl={{ antialias: true, powerPreference: 'high-performance' }}
+      performance={{ min: 0.5 }}
+      onCreated={() => onReady?.()}
+    >
+      <ambientLight intensity={0.5} />
+      <directionalLight position={[3, 5, 4]} intensity={0.4} />
 
-        <HexPrism position={[4.2, 1.4, -2]} scale={1.4} speed={0.7} color="#9B5DE5" />
-        <HexPrism position={[-4.8, -1.2, -3]} scale={1.0} speed={1.0} color="#B57DEE" />
-        <HexPrism position={[1.2, -2.4, -5]} scale={0.7} speed={1.3} color="#4FD1C5" />
-        <HexPrism position={[-2.2, 2.6, -4]} scale={0.55} speed={1.5} color="#9B5DE5" />
-        <HexPrism position={[3.4, -3.2, -6]} scale={0.5} speed={1.1} color="#B57DEE" />
-
-        <Sparkles count={60} scale={12} size={2} speed={0.3} color="#B57DEE" opacity={0.5} />
-      </Canvas>
-    </div>
+      <TokenCoin position={[3.6, 1, -2]} scale={1.6} speed={0.5} color="#2775CA" logoSrc={usdcLogo} />
+      <TokenCoin position={[-3.8, -1.2, -3]} scale={1.25} speed={0.65} color="#1B4CE0" logoSrc={eurcLogo} />
+    </Canvas>
   );
 }
