@@ -835,9 +835,9 @@ a.social-icon:hover {
 
 /* ---------- Refined glassmorphism redesign ---------- */
 .glass-panel {
-  background: rgba(20, 16, 28, 0.75);
-  backdrop-filter: blur(28px) saturate(1.1);
-  -webkit-backdrop-filter: blur(28px) saturate(1.1);
+  background: rgba(20, 16, 28, 0.55);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
   box-shadow: 0 4px 30px rgba(139, 92, 246, 0.03);
@@ -1065,10 +1065,6 @@ html, body {
 
 /* Fade-in rieng cho dong xu 3D - chi hien khi Canvas da san sang (tranh nhay dot ngot) */
 .landing-bg__coins {
-  opacity: 0;
-  transition: opacity 1.5s ease-out;
-}
-.landing-bg__coins--ready {
   opacity: 1;
 }
 
@@ -1087,12 +1083,13 @@ html, body {
   margin-bottom: 36px;
 }
 
+/* Thêm thẻ cha hoặc tăng độ ưu tiên để tránh bị đè khi reload */
 .markets-card {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
-  background: rgba(20, 16, 28, 0.75);
-  backdrop-filter: blur(28px) saturate(1.1);
-  -webkit-backdrop-filter: blur(28px) saturate(1.1);
+  background: rgba(20, 16, 28, 0.55);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   box-shadow: 0 4px 30px rgba(139, 92, 246, 0.03);
   padding: 8px 24px;
 }
@@ -1334,4 +1331,34 @@ html, body {
 }
 .drawer-amount-input input[type='number'] {
   -moz-appearance: textfield;
+}
+
+/* Lop dong xu mo rieng - chi hien trong pham vi cac khung (.glass-panel, .markets-card)
+   qua SVG clipPath dong bo theo vi tri that cua tung khung. Nam GIUA nen (sac net)
+   va noi dung (van ban) - khong can backdrop-filter, luon on dinh 100%. */
+.blurred-coins-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  filter: blur(36px);
+  clip-path: url(#card-windows-clip);
+}
+
+/* An dong xu sac net GOC dung tai phan nam trong khung - chi con lop mo (z-index 1) hien o do */
+.landing-bg__coins {
+  clip-path: url(#card-windows-inverse-clip);
+}
+
+/* Ep trinh duyet lien tuc "ve lai" lop backdrop-filter (khong chi khi cuon trang),
+   bang cach doi gia tri blur cuc nho, mat thuong khong nhan ra - giai quyet loi
+   phai cuon qua roi cuon lai moi thay kinh mo dung. */
+@keyframes glass-refresh {
+  0%   { backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+  50%  { backdrop-filter: blur(20.5px); -webkit-backdrop-filter: blur(20.5px); }
+  100% { backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+}
+.glass-panel,
+.markets-card {
+  animation: glass-refresh 2s ease-in-out infinite;
 }

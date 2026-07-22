@@ -29,11 +29,26 @@ export function StakeDrawer({ open, onClose }: { open: boolean; onClose: () => v
           { address: assetAddress, abi: erc20Abi, functionName: 'allowance', args: [address, CONTRACTS.stakingVault] },
         ]
       : [],
-    query: { enabled: !!address && open },
+    query: { enabled: !!address && open, staleTime: 10_000 },
   });
 
-  const balance = (readData?.[0]?.result as bigint) ?? 0n;
-  const allowance = (readData?.[1]?.result as bigint) ?? 0n;
+  const rawBalance = readData?.[0]?.result as bigint | undefined;
+  const rawAllowance = readData?.[1]?.result as bigint | undefined;
+
+  // Giu lai gia tri dung gan nhat da tung doc duoc cho CA balance lan allowance,
+  // khong de bi de ve 0 khi 1 lan poll sau do bi RPC 429 (that bai tam thoi)
+  // lam mat ket qua tot vua co.
+  const [lastGoodBalance, setLastGoodBalance] = useState<bigint>(0n);
+  const [lastGoodAllowance, setLastGoodAllowance] = useState<bigint>(0n);
+  useEffect(() => {
+    if (rawBalance !== undefined) setLastGoodBalance(rawBalance);
+  }, [rawBalance]);
+  useEffect(() => {
+    if (rawAllowance !== undefined) setLastGoodAllowance(rawAllowance);
+  }, [rawAllowance]);
+
+  const balance = rawBalance !== undefined ? rawBalance : lastGoodBalance;
+  const allowance = rawAllowance !== undefined ? rawAllowance : lastGoodAllowance;
   const needsApproval = amountWei > 0n && allowance < amountWei;
 
   const approveWrite = useWriteContract();
@@ -43,8 +58,17 @@ export function StakeDrawer({ open, onClose }: { open: boolean; onClose: () => v
   const stakeTx = useWaitForTransactionReceipt({ hash: stakeWrite.data });
 
   useEffect(() => {
-    if (approveTx.isSuccess) refetchReads();
-  }, [approveTx.isSuccess, refetchReads]);
+    if (!approveTx.isSuccess) return;
+    if (!needsApproval) return; // da du allowance roi, khong can poll nua
+    let attempts = 0;
+    const interval = setInterval(() => {
+      attempts += 1;
+      refetchReads();
+      if (attempts >= 8) clearInterval(interval);
+    }, 2000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [approveTx.isSuccess]);
 
   useEffect(() => {
     if (!open) {

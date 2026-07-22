@@ -63,18 +63,17 @@ export function usePositions() {
         from = to + 1n;
       }
 
-      const results = await Promise.all(
-        ranges.map((r) =>
-          publicClient.getLogs({
-            address: CONTRACTS.stakingVault,
-            event: STAKED_EVENT,
-            args: { user: address },
-            fromBlock: r.from,
-            toBlock: r.to,
-          })
-        )
-      );
-      const allLogs = results.flat();
+      const allLogs: Awaited<ReturnType<typeof publicClient.getLogs>> = [];
+      for (const r of ranges) {
+        const chunkLogs = await publicClient.getLogs({
+          address: CONTRACTS.stakingVault,
+          event: STAKED_EVENT,
+          args: { user: address },
+          fromBlock: r.from,
+          toBlock: r.to,
+        });
+        allLogs.push(...chunkLogs);
+      }
       const ids = allLogs.map((log) => (log.args as { positionId: bigint }).positionId);
       setPositionIds(ids);
     } catch (err) {
@@ -94,7 +93,7 @@ export function usePositions() {
       { address: CONTRACTS.stakingVault, abi: stakingVaultAbi, functionName: 'positions', args: [id] },
       { address: CONTRACTS.stakingVault, abi: stakingVaultAbi, functionName: 'pendingReward', args: [id] },
     ]),
-    query: { enabled: positionIds.length > 0, refetchInterval: 15_000 },
+    query: { enabled: positionIds.length > 0, refetchInterval: 60_000 },
   });
 
   const positions: StakePosition[] = [];

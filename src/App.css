@@ -67,3 +67,15 @@ a.social-icon:hover {
 .footer-copyright {
   margin-top: 24px;
 }
+
+/* Lop dong xu mo rieng - chi hien trong pham vi cac khung (.glass-panel, .markets-card)
+   qua SVG clipPath dong bo theo vi tri that cua tung khung. Nam GIUA nen (sac net)
+   va noi dung (van ban) - khong can backdrop-filter, luon on dinh 100%. */
+.blurred-coins-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  filter: blur(22px);
+  clip-path: url(#card-windows-clip);
+}

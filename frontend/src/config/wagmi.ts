@@ -11,7 +11,7 @@ export const arcTestnet = defineChain({
     decimals: 18, // USDC la native gas token tren Arc, dung 18 decimals o dang native
   },
   rpcUrls: {
-    default: { http: ['https://rpc.testnet.arc.network'] },
+    default: { http: ['https://lb.drpc.live/arc-testnet/AtzazkeoiUQeq1fgcB8rcNmXPT2FhFER8algwosiOHdW'] },
   },
   blockExplorers: {
     default: { name: 'ArcScan', url: 'https://testnet.arcscan.app' },

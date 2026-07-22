@@ -7,7 +7,13 @@ import './index.css';
 import App from './App.tsx';
 import { config } from './config/wagmi';
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
 createRoot(document.getElementById('root')!).render(
     <WagmiProvider config={config}>

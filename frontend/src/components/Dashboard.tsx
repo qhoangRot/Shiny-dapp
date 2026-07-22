@@ -120,6 +120,8 @@ export function Dashboard() {
   const [stakeDrawerOpen, setStakeDrawerOpen] = useState(false);
   const [borrowDrawerOpen, setBorrowDrawerOpen] = useState(false);
 
+  const anyDrawerOpen = stakeDrawerOpen || borrowDrawerOpen;
+
   const { data, isLoading } = useReadContracts({
     contracts: address
       ? [
@@ -131,7 +133,7 @@ export function Dashboard() {
           { address: CONTRACTS.priceOracle, abi: priceOracleAbi, functionName: 'viewPrice', args: [] },
         ]
       : [],
-    query: { enabled: !!address, refetchInterval: 15_000 },
+    query: { enabled: !!address, refetchInterval: anyDrawerOpen ? false : 30_000 },
   });
 
   if (!address) return null;

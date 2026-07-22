@@ -1,5 +1,6 @@
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { Hero3D } from './Hero3D';
+import { BlurredCoinsOverlay } from './BlurredCoinsOverlay';
 
 const STAR_COUNT = 130;
 const METEOR_COUNT = 2;
@@ -114,6 +115,8 @@ export function LandingBackground() {
           <Hero3D onReady={() => setCoinsReady(true)} />
         </Suspense>
       </div>
+
+      {coinsReady && <BlurredCoinsOverlay />}
     </div>
   );
 }
