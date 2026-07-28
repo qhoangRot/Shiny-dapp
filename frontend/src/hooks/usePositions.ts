@@ -1,10 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useAccount, usePublicClient, useReadContracts } from 'wagmi';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useAccount, useReadContract, useReadContracts } from 'wagmi';
 import { CONTRACTS, stakingVaultAbi } from '../config/contracts';
-
-// Block luc StakingVault duoc deploy (theo thu tu DeployAll.s.sol: PriceOracle -> StakingVault -> LendingPool).
-// Quet event log tu block nay thay vi block 0, vi RPC Arc Testnet gioi han eth_getLogs toi da 10,000 block/lan.
-const DEPLOY_BLOCK = 50285624n;
 
 export interface StakePosition {
   id: bigint;
@@ -17,101 +13,81 @@ export interface StakePosition {
   lastAccrualTime: bigint;
   accruedReward: bigint;
   withdrawn: boolean;
-  pendingReward: bigint;
 }
 
-const STAKED_EVENT = {
-  type: 'event' as const,
-  name: 'Staked' as const,
-  inputs: [
-    { name: 'positionId', type: 'uint256', indexed: true },
-    { name: 'user', type: 'address', indexed: true },
-    { name: 'asset', type: 'address', indexed: false },
-    { name: 'tier', type: 'uint8', indexed: false },
-    { name: 'amount', type: 'uint256', indexed: false },
-    { name: 'unlockTime', type: 'uint256', indexed: false },
-  ],
-};
+type PositionResult = [
+  `0x${string}`,
+  `0x${string}`,
+  number,
+  bigint,
+  bigint,
+  bigint,
+  bigint,
+  bigint,
+  boolean,
+];
 
 export function usePositions() {
   const { address } = useAccount();
-  const publicClient = usePublicClient();
-  const [positionIds, setPositionIds] = useState<bigint[]>([]);
-  const [loadingIds, setLoadingIds] = useState(true);
+  const refreshDetailsAfterCountRef = useRef(false);
 
-  const fetchIds = useCallback(async () => {
-    if (!address || !publicClient) {
-      setPositionIds([]);
-      setLoadingIds(false);
-      return;
-    }
-    setLoadingIds(true);
-    try {
-      const currentBlock = await publicClient.getBlockNumber();
-      const CHUNK_SIZE = 9_000n;
-      const MAX_LOOKBACK_BLOCKS = 200_000n;
-      const scanStart =
-        currentBlock - DEPLOY_BLOCK > MAX_LOOKBACK_BLOCKS
-          ? currentBlock - MAX_LOOKBACK_BLOCKS
-          : DEPLOY_BLOCK;
-
-      const ranges: { from: bigint; to: bigint }[] = [];
-      let from = scanStart;
-      while (from <= currentBlock) {
-        const to = from + CHUNK_SIZE > currentBlock ? currentBlock : from + CHUNK_SIZE;
-        ranges.push({ from, to });
-        from = to + 1n;
-      }
-
-      const allLogs: Awaited<ReturnType<typeof publicClient.getLogs>> = [];
-      for (const r of ranges) {
-        const chunkLogs = await publicClient.getLogs({
-          address: CONTRACTS.stakingVault,
-          event: STAKED_EVENT,
-          args: { user: address },
-          fromBlock: r.from,
-          toBlock: r.to,
-        });
-        allLogs.push(...chunkLogs);
-      }
-      const ids = allLogs.map((log) => (log.args as { positionId: bigint }).positionId);
-      setPositionIds(ids);
-    } catch (err) {
-      console.error('Loi khi lay danh sach position tu event log:', err);
-      setPositionIds([]);
-    } finally {
-      setLoadingIds(false);
-    }
-  }, [address, publicClient]);
-
-  useEffect(() => {
-    fetchIds();
-  }, [fetchIds]);
-
-  const { data, isLoading: loadingDetails, refetch: refetchDetails } = useReadContracts({
-    contracts: positionIds.flatMap((id) => [
-      { address: CONTRACTS.stakingVault, abi: stakingVaultAbi, functionName: 'positions', args: [id] },
-      { address: CONTRACTS.stakingVault, abi: stakingVaultAbi, functionName: 'pendingReward', args: [id] },
-    ]),
-    query: { enabled: positionIds.length > 0, refetchInterval: 60_000 },
+  const {
+    data: nextPositionId,
+    isLoading: loadingPositionCount,
+    isError: positionCountError,
+    dataUpdatedAt: positionCountUpdatedAt,
+    refetch: refetchPositionCount,
+  } = useReadContract({
+    address: CONTRACTS.stakingVault,
+    abi: stakingVaultAbi,
+    functionName: 'nextPositionId',
+    query: {
+      enabled: Boolean(address),
+      staleTime: 15_000,
+      refetchInterval: 30_000,
+    },
   });
 
-  const positions: StakePosition[] = [];
-  if (data) {
-    for (let i = 0; i < positionIds.length; i++) {
-      const posResult = data[i * 2]?.result as
-        | [`0x${string}`, `0x${string}`, number, bigint, bigint, bigint, bigint, bigint, boolean]
-        | undefined;
-      const rewardResult = data[i * 2 + 1]?.result as bigint | undefined;
-      if (!posResult) continue;
+  const positionIds = useMemo(() => {
+    if (!address || nextPositionId === undefined || nextPositionId <= 1n) return [];
 
-      const [owner, asset, tier, principal, startTime, unlockTime, lastAccrualTime, accruedReward, withdrawn] =
-        posResult;
+    return Array.from(
+      { length: Number(nextPositionId - 1n) },
+      (_, index) => BigInt(index + 1),
+    );
+  }, [address, nextPositionId]);
 
-      if (withdrawn) continue;
+  const {
+    data,
+    isLoading: loadingDetails,
+    isError: positionDetailsError,
+    dataUpdatedAt: positionDetailsUpdatedAt,
+    refetch: refetchDetails,
+  } = useReadContracts({
+    contracts: positionIds.map((id) => ({
+      address: CONTRACTS.stakingVault,
+      abi: stakingVaultAbi,
+      functionName: 'positions',
+      args: [id],
+    })),
+    query: {
+      enabled: Boolean(address) && positionIds.length > 0,
+      staleTime: 15_000,
+      refetchInterval: 30_000,
+    },
+  });
 
-      positions.push({
-        id: positionIds[i],
+  const positions = useMemo(() => {
+    if (!address || !data) return [];
+
+    const connectedAccount = address.toLowerCase();
+    const activePositions: StakePosition[] = [];
+
+    for (let index = 0; index < positionIds.length; index += 1) {
+      const position = data[index]?.result as PositionResult | undefined;
+      if (!position) continue;
+
+      const [
         owner,
         asset,
         tier,
@@ -121,20 +97,54 @@ export function usePositions() {
         lastAccrualTime,
         accruedReward,
         withdrawn,
-        pendingReward: rewardResult ?? 0n,
+      ] = position;
+
+      if (withdrawn || owner.toLowerCase() !== connectedAccount) continue;
+
+      activePositions.push({
+        id: positionIds[index],
+        owner,
+        asset,
+        tier,
+        principal,
+        startTime,
+        unlockTime,
+        lastAccrualTime,
+        accruedReward,
+        withdrawn,
       });
     }
-  }
 
-  // refetch "day du": quet lai event log de tim ID moi, ROI moi refetch chi tiet.
+    return activePositions;
+  }, [address, data, positionIds]);
+
+  useEffect(() => {
+    if (!refreshDetailsAfterCountRef.current) return;
+
+    refreshDetailsAfterCountRef.current = false;
+    if (positionIds.length > 0) void refetchDetails();
+  }, [positionIds, refetchDetails]);
+
   const refetch = useCallback(async () => {
-    await fetchIds();
-    await refetchDetails();
-  }, [fetchIds, refetchDetails]);
+    refreshDetailsAfterCountRef.current = true;
+    const refreshedCount = await refetchPositionCount();
+
+    // Withdraw keeps the same ID range, so refresh the existing rows now.
+    // A new stake changes nextPositionId; the effect above waits for React to
+    // build the new ID range before it fetches details for the new position.
+    if (refreshedCount.data === nextPositionId) {
+      refreshDetailsAfterCountRef.current = false;
+      if (positionIds.length > 0) await refetchDetails();
+    }
+  }, [nextPositionId, positionIds.length, refetchDetails, refetchPositionCount]);
 
   return {
     positions,
-    isLoading: loadingIds || loadingDetails,
+    isLoading:
+      Boolean(address) &&
+      (loadingPositionCount || (positionIds.length > 0 && loadingDetails)),
+    isError: positionCountError || positionDetailsError,
+    dataUpdatedAt: Math.max(positionCountUpdatedAt, positionDetailsUpdatedAt),
     refetch,
   };
 }

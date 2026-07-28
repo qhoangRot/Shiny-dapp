@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "./oracle/PriceOracle.sol";
+import "./oracle/IPriceOracle.sol";
 
 /// @title LendingPool - Shiny Protocol
 /// @notice Cho vay/muon cheo tai san (USDC <-> EURC), tinh Health Factor theo portfolio,
@@ -37,7 +37,7 @@ contract LendingPool is Ownable, Pausable, ReentrancyGuard {
 
     address public usdc;
     address public eurc;
-    PriceOracle public oracle; // Gia EURC/USD, dung de quy doi cheo USDC<->EURC
+    IPriceOracle public oracle; // Gia EURC/USD, dung de quy doi cheo USDC<->EURC
     IStakingVaultView public stakingVault; // Doc so du dang stake, khong can user rut ra
 
     mapping(address => bool) public supportedAssets;
@@ -75,7 +75,7 @@ contract LendingPool is Ownable, Pausable, ReentrancyGuard {
     {
         usdc = usdcAddress;
         eurc = eurcAddress;
-        oracle = PriceOracle(oracleAddress);
+        oracle = IPriceOracle(oracleAddress);
         supportedAssets[usdcAddress] = true;
         supportedAssets[eurcAddress] = true;
     }

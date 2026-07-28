@@ -1,38 +1,75 @@
 import { motion } from 'framer-motion';
+import { InfoTip } from './InfoTip';
+
+const MIN_GAUGE_HF = 1;
+const MAX_GAUGE_HF = 3;
+
+function gaugePosition(hf: number) {
+  return Math.min(
+    100,
+    Math.max(0, ((hf - MIN_GAUGE_HF) / (MAX_GAUGE_HF - MIN_GAUGE_HF)) * 100),
+  );
+}
 
 export function HealthFactorGauge({ hf, hasLoans }: { hf: number; hasLoans: boolean }) {
   if (!hasLoans) {
     return (
-      <div className="hf-row">
-        <span className="hf-row__label">Health Factor:</span>
-        <span className="hf-badge hf-badge--brand">No Active Loans</span>
-      </div>
+      <section className="hf-gauge hf-gauge--empty glass-panel" aria-label="Health Factor">
+        <div className="hf-gauge__top">
+          <span className="hf-gauge__label">
+            Health Factor
+            <InfoTip text="Health Factor measures the safety of your borrow position. A value at or below 1.00 can be liquidated." />
+          </span>
+          <span className="hf-gauge__status hf-gauge__status--neutral">No active loans</span>
+        </div>
+        <div className="hf-gauge__value">—</div>
+        <div className="hf-gauge__track hf-gauge__track--idle" aria-hidden="true" />
+        <p className="hf-gauge__hint">Your Health Factor will appear after you open a borrow position.</p>
+      </section>
     );
   }
 
-  let color = '#4FD1C5';
-  let bgClass = 'hf-badge--safe';
-  if (hf < 1.1) {
-    color = '#E5484D';
-    bgClass = 'hf-badge--danger';
-  } else if (hf < 1.5) {
-    color = '#E8B54C';
-    bgClass = 'hf-badge--warning';
-  }
-
-  const isDanger = hf < 1.1;
+  const isDanger = hf < 1.2;
+  const isWarning = hf >= 1.2 && hf < 1.5;
+  const status = isDanger ? 'Liquidation risk' : isWarning ? 'Needs attention' : 'Healthy';
+  const statusClass = isDanger ? 'danger' : isWarning ? 'warning' : 'safe';
+  const markerPosition = gaugePosition(hf);
 
   return (
-    <div className="hf-row">
-      <span className="hf-row__label">Health Factor:</span>
-      <motion.span
-        className={`hf-badge ${bgClass}`}
-        animate={isDanger ? { boxShadow: ['0 0 0px rgba(229,72,77,0)', '0 0 16px rgba(229,72,77,0.6)', '0 0 0px rgba(229,72,77,0)'] } : {}}
-        transition={isDanger ? { duration: 1.4, repeat: Infinity, ease: 'easeInOut' } : {}}
-        style={{ color }}
+    <motion.section
+      className={`hf-gauge hf-gauge--${statusClass} glass-panel`}
+      aria-label={`Health Factor ${hf.toFixed(2)}, ${status}`}
+      animate={isDanger ? { boxShadow: ['0 0 0 rgba(229,72,77,0)', '0 0 28px rgba(229,72,77,0.18)', '0 0 0 rgba(229,72,77,0)'] } : {}}
+      transition={isDanger ? { duration: 1.8, repeat: Infinity, ease: 'easeInOut' } : {}}
+    >
+      <div className="hf-gauge__top">
+        <span className="hf-gauge__label">
+          Health Factor
+          <InfoTip text="Health Factor measures the safety of your borrow position. A value at or below 1.00 can be liquidated." />
+        </span>
+        <span className={`hf-gauge__status hf-gauge__status--${statusClass}`}>{status}</span>
+      </div>
+      <div className="hf-gauge__value">{hf.toFixed(2)}</div>
+      <div
+        className="hf-gauge__track"
+        role="progressbar"
+        aria-label="Distance from liquidation threshold"
+        aria-valuemin={MIN_GAUGE_HF}
+        aria-valuemax={MAX_GAUGE_HF}
+        aria-valuenow={Math.min(MAX_GAUGE_HF, Math.max(MIN_GAUGE_HF, hf))}
       >
-        {hf.toFixed(2)}
-      </motion.span>
-    </div>
+        <motion.span
+          className="hf-gauge__marker"
+          initial={false}
+          animate={{ left: `${markerPosition}%` }}
+          transition={{ duration: 0.45, ease: 'easeOut' }}
+        />
+      </div>
+      <div className="hf-gauge__scale" aria-hidden="true">
+        <span>1.00 · Liquidation</span>
+        <span>1.50</span>
+        <span>3.00+ · Healthy</span>
+      </div>
+    </motion.section>
   );
 }

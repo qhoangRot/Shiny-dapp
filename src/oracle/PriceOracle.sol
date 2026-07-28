@@ -2,6 +2,7 @@
 pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "./IPriceOracle.sol";
 
 /// @notice Interface toi thieu cua Stork Oracle (da xac nhan tu docs.stork.network)
 interface IStork {
@@ -14,7 +15,7 @@ interface IStork {
 
 /// @title PriceOracle - Lop bao ve quanh Stork Oracle cho Shiny Protocol
 /// @notice Tu trien khai circuit breaker: tu choi gia stale hoac lech qua nguong (theo spec muc 5)
-contract PriceOracle is Ownable {
+contract PriceOracle is Ownable, IPriceOracle {
     IStork public stork;
     bytes32 public feedId; // Feed ID cho cap EURC/USD tren Stork asset registry
 
@@ -56,7 +57,7 @@ contract PriceOracle is Ownable {
 
     /// @notice Lay gia EURC/USD, da qua kiem tra staleness + deviation.
     ///         Se revert neu gia khong hop le -> Borrow/Liquidation tu dong dung (dung theo spec).
-    function getPrice() public returns (uint256 price) {
+    function getPrice() public override returns (uint256 price) {
         require(!paused, "Oracle: dang tam dung boi circuit breaker");
 
         IStork.TemporalNumericValue memory value = stork.getTemporalNumericValueUnsafeV1(feedId);
@@ -81,7 +82,7 @@ contract PriceOracle is Ownable {
     }
 
     /// @notice Ham chi doc, dung cho UI hien thi, khong cap nhat lastAcceptedPrice
-    function viewPrice() external view returns (uint256 price, uint256 timestamp) {
+    function viewPrice() external view override returns (uint256 price, uint256 timestamp) {
         IStork.TemporalNumericValue memory value = stork.getTemporalNumericValueUnsafeV1(feedId);
         return (uint256(int256(value.quantizedValue)), value.timestampNs / 1e9);
     }

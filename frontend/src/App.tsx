@@ -1,164 +1,181 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount } from 'wagmi';
-import { AnimatePresence, motion, type Variants } from 'framer-motion';
+import { useAccount, useChainId } from 'wagmi';
+import { AnimatePresence, motion } from 'framer-motion';
 import logo from './assets/logo.png';
-import { LandingSections } from './components/LandingPage';
-import { HowItWorks } from './components/HowItWorks';
+import { LandingLaunchButton, LandingPage } from './components/LandingPage';
 import { Dashboard } from './components/Dashboard';
-import { LandingBackground } from './components/LandingBackground';
+import { MarketsPage } from './components/MarketsPage';
+import { PositionsPage } from './components/PositionsPage';
+import { CreditScorePage } from './components/CreditScorePage';
+import { AnalyticsPage } from './components/AnalyticsPage';
 import { SmoothScroll } from './components/SmoothScroll';
 import './App.css';
 
-const NAV_ITEMS = ['Dashboard', 'Markets', 'My Positions', 'Credit Score', 'Analytics'];
+type View = 'landing' | 'app' | 'markets' | 'positions' | 'credit-score' | 'analytics';
 
-const heroContainerVariants: Variants = {
-  hidden: {},
-  visible: {
-    transition: { staggerChildren: 0.15, delayChildren: 0.1 },
-  },
-};
-
-const heroItemVariants: Variants = {
-  hidden: { opacity: 0, y: 30 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.8, ease: 'easeOut' } },
-};
+const NAV_ITEMS: { label: string; view: Exclude<View, 'landing'> }[] = [
+  { label: 'Dashboard', view: 'app' },
+  { label: 'Markets', view: 'markets' },
+  { label: 'My Positions', view: 'positions' },
+  { label: 'Credit Score', view: 'credit-score' },
+  { label: 'Analytics', view: 'analytics' },
+];
 
 function App() {
   const { isConnected } = useAccount();
-  const [view, setView] = useState<'landing' | 'app'>('landing');
-  const showDashboard = isConnected && view === 'app';
+  const chainId = useChainId();
+  const [view, setView] = useState<View>('landing');
+  const [landingHeaderTheme, setLandingHeaderTheme] = useState<'dark' | 'light'>('dark');
+  const [curtainActive, setCurtainActive] = useState(false);
+  const curtainTimers = useRef<number[]>([]);
+  const landingHeaderRef = useRef<HTMLElement>(null);
+  const showApp = isConnected && view !== 'landing';
+
+  const updateLandingHeaderExit = useCallback((progress: number) => {
+    const header = landingHeaderRef.current;
+    if (!header) return;
+
+    const clampedProgress = Math.max(0, Math.min(1, progress));
+    header.style.setProperty('--landing-header-offset', `${clampedProgress * -112}px`);
+    header.style.setProperty('--landing-header-opacity', `${1 - clampedProgress}`);
+    header.style.pointerEvents = clampedProgress >= 0.98 ? 'none' : '';
+  }, []);
+
   useEffect(() => {
     if (isConnected) setView('app');
   }, [isConnected]);
 
-  const goLanding = () => setView('landing');
+  useEffect(() => {
+    return () => curtainTimers.current.forEach((timer) => window.clearTimeout(timer));
+  }, []);
+
+  const goLanding = () => {
+    setView('landing');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const goApp = () => setView('app');
 
-  
+  const launchApp = () => {
+    if (curtainActive) return;
+    curtainTimers.current.forEach((timer) => window.clearTimeout(timer));
+    setCurtainActive(true);
+    curtainTimers.current = [
+      window.setTimeout(goApp, 520),
+      window.setTimeout(() => setCurtainActive(false), 1_350),
+    ];
+  };
+
+  const renderAppView = () => {
+    switch (view) {
+      case 'markets':
+        return <MarketsPage />;
+      case 'positions':
+        return <PositionsPage />;
+      case 'credit-score':
+        return <CreditScorePage />;
+      case 'analytics':
+        return <AnalyticsPage />;
+      default:
+        return <Dashboard />;
+    }
+  };
+
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <div className="app-header__left" onClick={goLanding} style={{ cursor: 'pointer' }}>
+    <div className={`app-shell ${showApp ? 'app-shell--protocol' : 'app-shell--landing'}`}>
+      <header
+        ref={landingHeaderRef}
+        className={`app-header ${
+          !showApp ? `landing-header landing-header--${landingHeaderTheme}` : ''
+        }`}
+      >
+        <button type="button" className="app-header__left" onClick={goLanding}>
           <img src={logo} alt="Shiny" className="app-logo" />
           <span className="app-name">Shiny</span>
-        </div>
+        </button>
 
-        {isConnected && (
+        {showApp ? (
           <nav className="app-nav">
-            {NAV_ITEMS.map((item, i) => (
+            {NAV_ITEMS.map((item) => (
               <a
-                key={item}
-                className={showDashboard && i === 0 ? 'active' : ''}
+                key={item.view}
+                className={view === item.view ? 'active' : ''}
                 href="#"
-                onClick={(e) => {
-                  e.preventDefault();
-                  goApp();
+                onClick={(event) => {
+                  event.preventDefault();
+                  setView(item.view);
                 }}
               >
-                {item}
+                {item.label}
               </a>
             ))}
+          </nav>
+        ) : (
+          <nav className="landing-nav" aria-label="Landing page">
+            <a href="#markets-section">MARKETS</a>
+            <a href="#protocol-section">PROTOCOL</a>
+            <a href="#faq-section">FAQ</a>
           </nav>
         )}
 
         <div className="app-header__right">
-          {!isConnected && (
-            <a
-              href="#"
-              className="docs-link"
-              onClick={(e) => {
-                e.preventDefault();
-                goLanding();
-              }}
-            >
-              Learn more
-            </a>
+          {showApp ? (
+            <>
+              <span className={`network-badge ${chainId === 5042002 ? '' : 'network-badge--wrong'}`}>
+                <span className="network-badge__dot" />
+                {chainId === 5042002 ? 'Arc Testnet' : 'Wrong network'}
+              </span>
+              <ConnectButton showBalance={false} />
+            </>
+          ) : (
+            <LandingLaunchButton onLaunch={launchApp} compact />
           )}
-          <ConnectButton showBalance={false} />
         </div>
       </header>
 
       <main className="app-main">
         <AnimatePresence mode="wait">
-          {showDashboard ? (
+          {showApp ? (
             <motion.div
-              key="dashboard"
+              key={view}
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -16 }}
               transition={{ duration: 0.35, ease: 'easeOut' }}
               style={{ width: '100%', display: 'flex', justifyContent: 'center' }}
             >
-              <Dashboard />
+              {renderAppView()}
             </motion.div>
           ) : (
             <motion.div
-              key="hero"
-              initial={{ opacity: 0, y: -16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 16 }}
-              transition={{ duration: 0.35, ease: 'easeOut' }}
+              key="landing"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.28, ease: 'easeOut' }}
               style={{ width: '100%' }}
             >
-              <LandingBackground />
               <SmoothScroll>
-                <PreConnectHero isConnected={isConnected} onGoDashboard={goApp} />
-                <LandingSections />
+                <LandingPage
+                  onLaunch={launchApp}
+                  onHeaderThemeChange={setLandingHeaderTheme}
+                  onHeaderExitProgressChange={updateLandingHeaderExit}
+                />
               </SmoothScroll>
             </motion.div>
           )}
         </AnimatePresence>
       </main>
+
+      <div className={`route-curtain ${curtainActive ? 'route-curtain--active' : ''}`} aria-hidden="true">
+        {Array.from({ length: 12 }, (_, index) => (
+          <i key={index} style={{ '--curtain-index': index } as CSSProperties} />
+        ))}
+        <span>SHINY / ENTERING PROTOCOL</span>
+      </div>
     </div>
   );
 }
 
-function PreConnectHero({
-  isConnected,
-  onGoDashboard,
-}: {
-  isConnected: boolean;
-  onGoDashboard: () => void;
-}) {
-  return (
-    <div>
-      <motion.div
-        className="hero"
-        variants={heroContainerVariants}
-        initial="hidden"
-        animate="visible"
-      >
-        <motion.div className="hero-badge" variants={heroItemVariants}>
-          <img src={logo} alt="" className="hero-badge__logo" />
-          <span>Shiny</span>
-        </motion.div>
-        <motion.h1 variants={heroItemVariants}>Stake and earn real yield</motion.h1>
-        <motion.p className="hero-subtext" variants={heroItemVariants}>
-          Revenue - sharing lending protocol
-        </motion.p>
-        <motion.div className="hero-badges" variants={heroItemVariants}>
-          <span className="badge badge--blue">Supported: USDC, EURC</span>
-          <span className="badge badge--accent">Live on Arc Testnet</span>
-        </motion.div>
-        {isConnected ? (
-          <motion.button
-            className="cta-button"
-            onClick={onGoDashboard}
-            variants={heroItemVariants}
-            whileHover={{ scale: 1.04 }}
-            whileTap={{ scale: 0.97 }}
-          >
-            Go to Dashboard →
-          </motion.button>
-        ) : (
-          <motion.p className="hero-cta-hint" variants={heroItemVariants}>
-            Get started ↑
-          </motion.p>
-        )}
-      </motion.div>
-      <HowItWorks />
-    </div>
-  );
-}
 export default App;
