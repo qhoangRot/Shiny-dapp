@@ -8,8 +8,8 @@ import "./IPriceOracle.sol";
 /// @notice Owner-maintained EUR/USD price for Arc Testnet only.
 /// @dev This is deliberately not presented as a decentralized or production oracle.
 contract ManualTestnetOracle is Ownable, IPriceOracle {
-    uint256 public constant MIN_EUR_USD_PRICE = 0.80e18;
-    uint256 public constant MAX_EUR_USD_PRICE = 1.50e18;
+    uint256 public constant MIN_EUR_USD_PRICE = 0.8e18;
+    uint256 public constant MAX_EUR_USD_PRICE = 1.5e18;
 
     uint256 public price;
     uint256 public updatedAt;

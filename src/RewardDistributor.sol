@@ -104,18 +104,10 @@ contract RewardDistributor is Ownable, ReentrancyGuard {
     );
     event ProgramFunded(uint256 indexed programId, address indexed funder, address indexed asset, uint256 amount);
     event ProgramRewardClaimed(
-        uint256 indexed programId,
-        uint256 indexed positionId,
-        address indexed account,
-        address asset,
-        uint256 amount
+        uint256 indexed programId, uint256 indexed positionId, address indexed account, address asset, uint256 amount
     );
     event RewardClaimed(
-        uint256 indexed positionId,
-        address indexed account,
-        address indexed asset,
-        uint256 amount,
-        uint256 programCount
+        uint256 indexed positionId, address indexed account, address indexed asset, uint256 amount, uint256 programCount
     );
 
     constructor(address initialOwner, address stakingVaultAddress) Ownable(initialOwner) {
@@ -174,15 +166,7 @@ contract RewardDistributor is Ownable, ReentrancyGuard {
         latestProgramId[asset] = programId;
         _assetProgramIds[asset].push(programId);
 
-        emit ProgramCreated(
-            programId,
-            asset,
-            startTime,
-            endTime,
-            flexibleAnnualBps,
-            growthAnnualBps,
-            diamondAnnualBps
-        );
+        emit ProgramCreated(programId, asset, startTime, endTime, flexibleAnnualBps, growthAnnualBps, diamondAnnualBps);
     }
 
     /// @notice Adds a physically transferred, same-asset reserve to a program.
@@ -207,11 +191,7 @@ contract RewardDistributor is Ownable, ReentrancyGuard {
     /// @notice Claims reward from one explicit program.
     /// @dev Frontends should normally call claimReward(positionId), which
     ///      aggregates every relevant program and performs one token transfer.
-    function claimProgramReward(uint256 programId, uint256 positionId)
-        external
-        nonReentrant
-        returns (uint256 amount)
-    {
+    function claimProgramReward(uint256 programId, uint256 positionId) external nonReentrant returns (uint256 amount) {
         RewardProgram storage program = _requireProgram(programId);
         PositionSnapshot memory position = _getPosition(positionId);
         _validatePositionForClaim(positionId, position, msg.sender);
@@ -219,13 +199,8 @@ contract RewardDistributor is Ownable, ReentrancyGuard {
             revert PositionAssetMismatch(positionId, program.asset, position.asset);
         }
 
-        uint256 totalEarned = _calculateEarned(
-            program,
-            positionId,
-            position.tier,
-            position.principal,
-            position.startTime
-        );
+        uint256 totalEarned =
+            _calculateEarned(program, positionId, position.tier, position.principal, position.startTime);
         uint256 alreadyClaimed = claimedByPosition[programId][positionId];
         if (totalEarned <= alreadyClaimed) revert NothingToClaim(programId, positionId);
         amount = totalEarned - alreadyClaimed;
@@ -261,13 +236,8 @@ contract RewardDistributor is Ownable, ReentrancyGuard {
         for (uint256 index = 0; index < length; index++) {
             uint256 programId = programIds[index];
             RewardProgram storage program = programs[programId];
-            uint256 totalEarned = _calculateEarned(
-                program,
-                positionId,
-                position.tier,
-                position.principal,
-                position.startTime
-            );
+            uint256 totalEarned =
+                _calculateEarned(program, positionId, position.tier, position.principal, position.startTime);
             uint256 alreadyClaimed = claimedByPosition[programId][positionId];
             if (totalEarned <= alreadyClaimed) continue;
 
@@ -313,13 +283,8 @@ contract RewardDistributor is Ownable, ReentrancyGuard {
             return 0;
         }
 
-        uint256 totalEarned = _calculateEarned(
-            program,
-            positionId,
-            position.tier,
-            position.principal,
-            position.startTime
-        );
+        uint256 totalEarned =
+            _calculateEarned(program, positionId, position.tier, position.principal, position.startTime);
         uint256 alreadyClaimed = claimedByPosition[programId][positionId];
         return totalEarned > alreadyClaimed ? totalEarned - alreadyClaimed : 0;
     }
@@ -328,9 +293,7 @@ contract RewardDistributor is Ownable, ReentrancyGuard {
     /// @dev This is the frontend-compatible getter; no programId is required.
     function pendingReward(uint256 positionId) external view returns (uint256 amount) {
         PositionSnapshot memory position = _getPosition(positionId);
-        if (
-            position.owner == address(0) || position.withdrawn || position.principal == 0 || position.tier > 2
-        ) {
+        if (position.owner == address(0) || position.withdrawn || position.principal == 0 || position.tier > 2) {
             return 0;
         }
 
@@ -338,13 +301,8 @@ contract RewardDistributor is Ownable, ReentrancyGuard {
         for (uint256 index = 0; index < programIds.length; index++) {
             uint256 programId = programIds[index];
             RewardProgram storage program = programs[programId];
-            uint256 totalEarned = _calculateEarned(
-                program,
-                positionId,
-                position.tier,
-                position.principal,
-                position.startTime
-            );
+            uint256 totalEarned =
+                _calculateEarned(program, positionId, position.tier, position.principal, position.startTime);
             uint256 alreadyClaimed = claimedByPosition[programId][positionId];
             if (totalEarned > alreadyClaimed) amount += totalEarned - alreadyClaimed;
         }
@@ -388,24 +346,14 @@ contract RewardDistributor is Ownable, ReentrancyGuard {
     }
 
     function _getPosition(uint256 positionId) internal view returns (PositionSnapshot memory position) {
-        (
-            position.owner,
-            position.asset,
-            position.tier,
-            position.principal,
-            position.startTime,
-            ,
-            ,
-            ,
-            position.withdrawn
-        ) = stakingVault.positions(positionId);
+        (position.owner, position.asset, position.tier, position.principal, position.startTime,,,, position.withdrawn) =
+            stakingVault.positions(positionId);
     }
 
-    function _validatePositionForClaim(
-        uint256 positionId,
-        PositionSnapshot memory position,
-        address caller
-    ) internal pure {
+    function _validatePositionForClaim(uint256 positionId, PositionSnapshot memory position, address caller)
+        internal
+        pure
+    {
         if (position.owner == address(0)) revert PositionNotFound(positionId);
         if (position.owner != caller) revert NotPositionOwner(positionId, caller);
         if (position.withdrawn || position.principal == 0) revert PositionInactive(positionId);
@@ -425,11 +373,7 @@ contract RewardDistributor is Ownable, ReentrancyGuard {
 
         uint256 annualBps = _annualBpsForTier(program, positionId, tier);
         uint256 elapsed = accrualEnd - accrualStart;
-        return Math.mulDiv(
-            principal,
-            annualBps * elapsed,
-            BPS_DENOMINATOR * SECONDS_PER_YEAR
-        );
+        return Math.mulDiv(principal, annualBps * elapsed, BPS_DENOMINATOR * SECONDS_PER_YEAR);
     }
 
     function _annualBpsForTier(RewardProgram storage program, uint256 positionId, uint8 tier)

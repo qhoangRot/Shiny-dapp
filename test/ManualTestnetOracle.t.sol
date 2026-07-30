@@ -21,22 +21,22 @@ contract ManualTestnetOracleTest is Test {
 
     function testOwnerCanUpdatePrice() public {
         vm.prank(owner);
-        oracle.setPrice(1.10e18);
+        oracle.setPrice(1.1e18);
 
         (uint256 price,) = oracle.viewPrice();
-        assertEq(price, 1.10e18);
+        assertEq(price, 1.1e18);
     }
 
     function testRejectsPriceOutsideTestRange() public {
         vm.prank(owner);
         vm.expectRevert("ManualOracle: price outside EUR/USD test range");
-        oracle.setPrice(1.60e18);
+        oracle.setPrice(1.6e18);
     }
 
     function testRejectsUnauthorizedUpdate() public {
         vm.prank(stranger);
         vm.expectRevert();
-        oracle.setPrice(1.10e18);
+        oracle.setPrice(1.1e18);
     }
 
     function testRejectsStalePrice() public {

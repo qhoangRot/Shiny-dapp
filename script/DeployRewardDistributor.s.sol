@@ -62,22 +62,10 @@ contract DeployRewardDistributor is Script {
         require(usdcFunding > 0, "USDC reward funding must be explicit and non-zero");
         require(eurcFunding > 0, "EURC reward funding must be explicit and non-zero");
 
-        uint256 usdcProgramId = distributor.createProgram(
-            usdc,
-            startTime,
-            endTime,
-            flexibleAnnualBps,
-            growthAnnualBps,
-            diamondAnnualBps
-        );
-        uint256 eurcProgramId = distributor.createProgram(
-            eurc,
-            startTime,
-            endTime,
-            flexibleAnnualBps,
-            growthAnnualBps,
-            diamondAnnualBps
-        );
+        uint256 usdcProgramId =
+            distributor.createProgram(usdc, startTime, endTime, flexibleAnnualBps, growthAnnualBps, diamondAnnualBps);
+        uint256 eurcProgramId =
+            distributor.createProgram(eurc, startTime, endTime, flexibleAnnualBps, growthAnnualBps, diamondAnnualBps);
 
         IERC20(usdc).forceApprove(address(distributor), usdcFunding);
         distributor.fundProgram(usdcProgramId, usdcFunding);

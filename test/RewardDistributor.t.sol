@@ -29,18 +29,10 @@ contract RewardDistributorTest is Test {
     );
     event ProgramFunded(uint256 indexed programId, address indexed funder, address indexed asset, uint256 amount);
     event ProgramRewardClaimed(
-        uint256 indexed programId,
-        uint256 indexed positionId,
-        address indexed account,
-        address asset,
-        uint256 amount
+        uint256 indexed programId, uint256 indexed positionId, address indexed account, address asset, uint256 amount
     );
     event RewardClaimed(
-        uint256 indexed positionId,
-        address indexed account,
-        address indexed asset,
-        uint256 amount,
-        uint256 programCount
+        uint256 indexed positionId, address indexed account, address indexed asset, uint256 amount, uint256 programCount
     );
 
     function setUp() public {
@@ -118,20 +110,12 @@ contract RewardDistributorTest is Test {
         distributor.createProgram(address(unsupported), nowTime, nowTime + 1 days, 500, 600, 700);
 
         vm.expectRevert(
-            abi.encodeWithSelector(
-                RewardDistributor.InvalidProgramWindow.selector,
-                nowTime + 1 days,
-                nowTime + 1 days
-            )
+            abi.encodeWithSelector(RewardDistributor.InvalidProgramWindow.selector, nowTime + 1 days, nowTime + 1 days)
         );
         distributor.createProgram(address(usdc), nowTime + 1 days, nowTime + 1 days, 500, 600, 700);
 
         vm.expectRevert(
-            abi.encodeWithSelector(
-                RewardDistributor.ProgramStartsInPast.selector,
-                nowTime - 1,
-                uint256(nowTime)
-            )
+            abi.encodeWithSelector(RewardDistributor.ProgramStartsInPast.selector, nowTime - 1, uint256(nowTime))
         );
         distributor.createProgram(address(usdc), nowTime - 1, nowTime + 1 days, 500, 600, 700);
 
@@ -141,14 +125,7 @@ contract RewardDistributorTest is Test {
         vm.expectRevert(RewardDistributor.AllRatesAreZero.selector);
         distributor.createProgram(address(usdc), nowTime, nowTime + 1 days, 0, 0, 0);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                RewardDistributor.InvalidTierRateOrder.selector,
-                700,
-                600,
-                800
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(RewardDistributor.InvalidTierRateOrder.selector, 700, 600, 800));
         distributor.createProgram(address(usdc), nowTime, nowTime + 1 days, 700, 600, 800);
     }
 
@@ -159,22 +136,17 @@ contract RewardDistributorTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                RewardDistributor.ProgramOverlap.selector,
-                address(usdc),
-                uint256(firstEnd),
-                uint256(firstEnd - 1)
+                RewardDistributor.ProgramOverlap.selector, address(usdc), uint256(firstEnd), uint256(firstEnd - 1)
             )
         );
         distributor.createProgram(address(usdc), firstEnd - 1, firstEnd + 30 days, 500, 600, 700);
 
-        uint256 secondId =
-            distributor.createProgram(address(usdc), firstEnd, firstEnd + 30 days, 400, 500, 600);
+        uint256 secondId = distributor.createProgram(address(usdc), firstEnd, firstEnd + 30 days, 400, 500, 600);
         assertEq(secondId, 2);
         assertEq(distributor.latestProgramId(address(usdc)), secondId);
 
         // A different asset has an independent timeline.
-        uint256 eurcId =
-            distributor.createProgram(address(eurc), firstStart, firstEnd, 300, 400, 500);
+        uint256 eurcId = distributor.createProgram(address(eurc), firstStart, firstEnd, 300, 400, 500);
         assertEq(eurcId, 3);
         assertEq(distributor.latestProgramId(address(eurc)), eurcId);
     }
@@ -186,8 +158,7 @@ contract RewardDistributorTest is Test {
         vm.warp(block.timestamp + 30 days);
         uint64 programStart = uint64(block.timestamp + 1 days);
         uint64 programEnd = uint64(programStart + 365 days);
-        uint256 programId =
-            distributor.createProgram(address(usdc), programStart, programEnd, 1_000, 1_000, 1_000);
+        uint256 programId = distributor.createProgram(address(usdc), programStart, programEnd, 1_000, 1_000, 1_000);
         _fund(programId, 200e6);
 
         vm.warp(programStart - 1);
@@ -208,8 +179,7 @@ contract RewardDistributorTest is Test {
     function test_PositionCreatedDuringProgramAccruesOnlyFromStakeTime() public {
         uint64 programStart = uint64(block.timestamp + 1 days);
         uint64 programEnd = uint64(programStart + 365 days);
-        uint256 programId =
-            distributor.createProgram(address(usdc), programStart, programEnd, 1_000, 1_000, 1_000);
+        uint256 programId = distributor.createProgram(address(usdc), programStart, programEnd, 1_000, 1_000, 1_000);
         _fund(programId, 200e6);
 
         vm.warp(programStart + 100 days);
@@ -228,8 +198,7 @@ contract RewardDistributorTest is Test {
 
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 365 days);
-        uint256 programId =
-            distributor.createProgram(address(usdc), startTime, endTime, 500, 600, 700);
+        uint256 programId = distributor.createProgram(address(usdc), startTime, endTime, 500, 600, 700);
         _fund(programId, 180e6);
 
         vm.warp(endTime);
@@ -246,8 +215,7 @@ contract RewardDistributorTest is Test {
         uint256 positionId = _stakeUsdc(alice, 1_000e6, StakingVault.Tier.Flexible);
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 365 days);
-        uint256 programId =
-            distributor.createProgram(address(usdc), startTime, endTime, 1_000, 1_000, 1_000);
+        uint256 programId = distributor.createProgram(address(usdc), startTime, endTime, 1_000, 1_000, 1_000);
 
         vm.expectEmit(true, true, true, true);
         emit ProgramFunded(programId, address(this), address(usdc), 100e6);
@@ -273,9 +241,7 @@ contract RewardDistributorTest is Test {
         assertEq(distributor.programAvailableReserve(programId), 0);
         assertEq(distributor.reservedByAsset(address(usdc)), 0);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(RewardDistributor.NoRewardsToClaim.selector, positionId)
-        );
+        vm.expectRevert(abi.encodeWithSelector(RewardDistributor.NoRewardsToClaim.selector, positionId));
         vm.prank(alice);
         distributor.claimReward(positionId);
     }
@@ -288,9 +254,7 @@ contract RewardDistributorTest is Test {
         _fund(programId, 100e6);
         vm.warp(block.timestamp + 1 days);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(RewardDistributor.NotPositionOwner.selector, positionId, bob)
-        );
+        vm.expectRevert(abi.encodeWithSelector(RewardDistributor.NotPositionOwner.selector, positionId, bob));
         vm.prank(bob);
         distributor.claimReward(positionId);
 
@@ -298,9 +262,7 @@ contract RewardDistributorTest is Test {
         vault.withdraw(positionId);
         assertEq(distributor.pendingReward(positionId), 0);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(RewardDistributor.PositionInactive.selector, positionId)
-        );
+        vm.expectRevert(abi.encodeWithSelector(RewardDistributor.PositionInactive.selector, positionId));
         vm.prank(alice);
         distributor.claimReward(positionId);
     }
@@ -326,18 +288,12 @@ contract RewardDistributorTest is Test {
         uint256 positionId = _stakeUsdc(alice, 1_000e6, StakingVault.Tier.Flexible);
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 365 days);
-        uint256 programId =
-            distributor.createProgram(address(usdc), startTime, endTime, 1_000, 1_000, 1_000);
+        uint256 programId = distributor.createProgram(address(usdc), startTime, endTime, 1_000, 1_000, 1_000);
         _fund(programId, 10e6);
         vm.warp(endTime);
 
         vm.expectRevert(
-            abi.encodeWithSelector(
-                RewardDistributor.InsufficientProgramReserve.selector,
-                programId,
-                10e6,
-                100e6
-            )
+            abi.encodeWithSelector(RewardDistributor.InsufficientProgramReserve.selector, programId, 10e6, 100e6)
         );
         vm.prank(alice);
         distributor.claimReward(positionId);
@@ -365,10 +321,8 @@ contract RewardDistributorTest is Test {
         uint64 startTime = uint64(block.timestamp);
         uint64 endTime = uint64(block.timestamp + 365 days);
 
-        uint256 usdcProgram =
-            distributor.createProgram(address(usdc), startTime, endTime, 500, 500, 500);
-        uint256 eurcProgram =
-            distributor.createProgram(address(eurc), startTime, endTime, 700, 700, 700);
+        uint256 usdcProgram = distributor.createProgram(address(usdc), startTime, endTime, 500, 500, 500);
+        uint256 eurcProgram = distributor.createProgram(address(eurc), startTime, endTime, 700, 700, 700);
         _fund(usdcProgram, 50e6);
         _fund(eurcProgram, 70e6);
         vm.warp(endTime);
@@ -392,10 +346,8 @@ contract RewardDistributorTest is Test {
         uint64 boundary = uint64(block.timestamp + 365 days);
         uint64 secondEnd = uint64(boundary + 365 days);
 
-        uint256 firstProgram =
-            distributor.createProgram(address(usdc), firstStart, boundary, 500, 600, 700);
-        uint256 secondProgram =
-            distributor.createProgram(address(usdc), boundary, secondEnd, 700, 800, 900);
+        uint256 firstProgram = distributor.createProgram(address(usdc), firstStart, boundary, 500, 600, 700);
+        uint256 secondProgram = distributor.createProgram(address(usdc), boundary, secondEnd, 700, 800, 900);
         _fund(firstProgram, 50e6);
         _fund(secondProgram, 70e6);
 
@@ -427,9 +379,7 @@ contract RewardDistributorTest is Test {
         assertEq(distributor.programAvailableReserve(secondProgram), 0);
     }
 
-    function testFuzz_RewardFormulaMatchesAnnualBps(uint96 rawPrincipal, uint16 rawBps, uint32 rawElapsed)
-        public
-    {
+    function testFuzz_RewardFormulaMatchesAnnualBps(uint96 rawPrincipal, uint16 rawBps, uint32 rawElapsed) public {
         uint256 principal = bound(uint256(rawPrincipal), 10e6, 90_000e6);
         uint32 annualBps = uint32(bound(uint256(rawBps), 1, 10_000));
         uint256 elapsed = bound(uint256(rawElapsed), 1, 365 days);
@@ -437,12 +387,7 @@ contract RewardDistributorTest is Test {
         uint256 positionId = _stakeUsdc(alice, principal, StakingVault.Tier.Flexible);
         uint64 startTime = uint64(block.timestamp);
         uint256 programId = distributor.createProgram(
-            address(usdc),
-            startTime,
-            uint64(block.timestamp + 365 days),
-            annualBps,
-            annualBps,
-            annualBps
+            address(usdc), startTime, uint64(block.timestamp + 365 days), annualBps, annualBps, annualBps
         );
 
         vm.warp(block.timestamp + elapsed);
@@ -450,18 +395,12 @@ contract RewardDistributorTest is Test {
         assertEq(distributor.pendingRewardForProgram(programId, positionId), expected);
     }
 
-    function _stakeUsdc(address account, uint256 amount, StakingVault.Tier tier)
-        internal
-        returns (uint256)
-    {
+    function _stakeUsdc(address account, uint256 amount, StakingVault.Tier tier) internal returns (uint256) {
         vm.prank(account);
         return vault.stake(address(usdc), amount, tier);
     }
 
-    function _stakeEurc(address account, uint256 amount, StakingVault.Tier tier)
-        internal
-        returns (uint256)
-    {
+    function _stakeEurc(address account, uint256 amount, StakingVault.Tier tier) internal returns (uint256) {
         vm.prank(account);
         return vault.stake(address(eurc), amount, tier);
     }
