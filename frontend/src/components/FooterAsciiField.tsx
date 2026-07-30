@@ -341,8 +341,8 @@ export function FooterAsciiField() {
       },
       { threshold: 0.08 },
     );
-    const visibilityTarget = canvas.closest('.landmark-footer-reveal') ?? canvas;
-    const interactionTarget = canvas.closest<HTMLElement>('.landmark-footer') ?? canvas.parentElement;
+    const visibilityTarget = canvas.closest('.shiny-footer-reveal') ?? canvas;
+    const interactionTarget = canvas.closest<HTMLElement>('.shiny-footer') ?? canvas.parentElement;
     const keyboardTarget = canvas.parentElement;
 
     resizeObserver.observe(canvas);

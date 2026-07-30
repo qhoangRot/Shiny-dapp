@@ -61,7 +61,7 @@ export function LandingLaunchButton({
         return (
           <button
             type="button"
-            className={`landmark-action ${compact ? 'landmark-action--compact' : ''}`}
+            className={`shiny-action ${compact ? 'shiny-action--compact' : ''}`}
             onClick={() => {
               if (!connected) openConnectModal();
               else if (chain.unsupported) openChainModal();
@@ -69,7 +69,7 @@ export function LandingLaunchButton({
             }}
           >
             <span>{label}</span>
-            <span className="landmark-action__icon" aria-hidden="true">↗</span>
+            <span className="shiny-action__icon" aria-hidden="true">↗</span>
           </button>
         );
       }}
@@ -89,33 +89,33 @@ function MarketShowcase() {
   ];
 
   return (
-    <div className="landmark-markets__cards">
+    <div className="shiny-markets__cards">
       {markets.map((market, index) => (
         <motion.article
-          className="landmark-market-card"
+          className="shiny-market-card"
           key={market.symbol}
           initial={{ opacity: 0, y: 48 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.2 }}
           transition={{ duration: 0.7, delay: index * 0.08 }}
         >
-          <div className="landmark-market-card__top">
-            <span className="landmark-market-card__index">0{index + 1}</span>
-            <span className="landmark-market-card__status"><i /> ARC TESTNET</span>
+          <div className="shiny-market-card__top">
+            <span className="shiny-market-card__index">0{index + 1}</span>
+            <span className="shiny-market-card__status"><i /> ARC TESTNET</span>
           </div>
-          <div className="landmark-market-card__identity">
+          <div className="shiny-market-card__identity">
             <img src={market.logo} alt="" />
             <div>
               <h3>{market.symbol}</h3>
               <p>{market.name}</p>
             </div>
           </div>
-          <div className="landmark-market-card__rates">
+          <div className="shiny-market-card__rates">
             {['FLEXIBLE', 'GROWTH / 6M', 'DIAMOND / 12M'].map((tier, tierIndex) => (
               <div key={tier}>
                 <span>{tier}</span>
                 {isLoading ? (
-                  <i className="landmark-skeleton" aria-label="Loading reward APR" />
+                  <i className="shiny-skeleton" aria-label="Loading reward APR" />
                 ) : !isConfigured || getAnnualRateBps(market.asset, tierIndex) === 0n ? (
                   <strong>—</strong>
                 ) : (
@@ -126,7 +126,7 @@ function MarketShowcase() {
               </div>
             ))}
           </div>
-          <p className="landmark-market-card__footnote">
+          <p className="shiny-market-card__footnote">
             REWARD APR · UPDATES FROM THE REWARD DISTRIBUTOR
           </p>
         </motion.article>
@@ -139,12 +139,12 @@ function PrinciplesGrid() {
   const [scrambleRuns, setScrambleRuns] = useState<Record<string, number>>({});
 
   return (
-    <section id="protocol-section" className="landmark-principles landmark-theme-light" data-header-theme="light">
-      <div className="landmark-principles__heading">
+    <section id="protocol-section" className="shiny-principles shiny-theme-light" data-header-theme="light">
+      <div className="shiny-principles__heading">
         <h2><TextScramble text="Built for capital that refuses to sit still" /></h2>
         <p>// THE PROTOCOL</p>
       </div>
-      <div className="landmark-principles__grid">
+      <div className="shiny-principles__grid">
         {PRINCIPLES.map(([number, title, body]) => (
           <article
             key={number}
@@ -174,15 +174,15 @@ function FaqSection() {
   const [openIndex, setOpenIndex] = useState<number | null>(null);
 
   return (
-    <section id="faq-section" className="landmark-faq landmark-theme-dark" data-header-theme="dark">
-      <div className="landmark-faq__heading">
+    <section id="faq-section" className="shiny-faq shiny-theme-dark" data-header-theme="dark">
+      <div className="shiny-faq__heading">
         <h2>FAQs</h2>
       </div>
-      <div className="landmark-faq__list">
+      <div className="shiny-faq__list">
         {FAQ_ITEMS.map((item, index) => {
           const isOpen = openIndex === index;
           return (
-            <article className={`landmark-faq__item ${isOpen ? 'is-open' : ''}`} key={item.q}>
+            <article className={`shiny-faq__item ${isOpen ? 'is-open' : ''}`} key={item.q}>
               <button
                 type="button"
                 aria-expanded={isOpen}
@@ -191,7 +191,7 @@ function FaqSection() {
                 <TextScramble text={item.q} />
                 <span aria-hidden="true">{isOpen ? '−' : '+'}</span>
               </button>
-              <div className="landmark-faq__answer">
+              <div className="shiny-faq__answer">
                 <div><p>{item.a}</p></div>
               </div>
             </article>
@@ -204,25 +204,25 @@ function FaqSection() {
 
 function LandingFooter({ onLaunch }: { onLaunch: () => void }) {
   return (
-    <div className="landmark-footer-reveal">
-      <section className="landmark-cta landmark-theme-light" data-header-theme="light">
-        <div className="landmark-cta__capital-map" aria-hidden="true">
-          <div className="landmark-cta__capital-map-heading">
+    <div className="shiny-footer-reveal">
+      <section className="shiny-cta shiny-theme-light" data-header-theme="light">
+        <div className="shiny-cta__capital-map" aria-hidden="true">
+          <div className="shiny-cta__capital-map-heading">
             <span>CAPITAL IN MOTION</span>
             <span>ARC TESTNET</span>
           </div>
-          <div className="landmark-cta__capital-rail">
-            <div className="landmark-cta__capital-node landmark-cta__capital-node--asset">
+          <div className="shiny-cta__capital-rail">
+            <div className="shiny-cta__capital-node shiny-cta__capital-node--asset">
               <i />
               <strong>USDC / EURC</strong>
               <small>DEPOSIT</small>
             </div>
-            <div className="landmark-cta__capital-node landmark-cta__capital-node--vault">
+            <div className="shiny-cta__capital-node shiny-cta__capital-node--vault">
               <i>S</i>
               <strong>SHINY VAULT</strong>
               <small>POSITION</small>
             </div>
-            <div className="landmark-cta__capital-node landmark-cta__capital-node--utility">
+            <div className="shiny-cta__capital-node shiny-cta__capital-node--utility">
               <i />
               <strong>STAKE / BORROW</strong>
               <small>KEEP EARNING</small>
@@ -232,20 +232,20 @@ function LandingFooter({ onLaunch }: { onLaunch: () => void }) {
         <div>
           <h2>Put stablecoins<br />to work</h2>
         </div>
-        <div className="landmark-cta__action">
+        <div className="shiny-cta__action">
           <p>STAKE · EARN · BORROW</p>
           <LandingLaunchButton onLaunch={onLaunch} />
           <span>ARC TESTNET · USDC + EURC</span>
         </div>
       </section>
-      <footer id="footer-section" className="landmark-footer landmark-theme-dark" data-header-theme="dark">
-        <div className="landmark-footer__top">
+      <footer id="footer-section" className="shiny-footer shiny-theme-dark" data-header-theme="dark">
+        <div className="shiny-footer__top">
           <div>
             <strong>SHINY</strong>
             <p>PRODUCTIVE STABLECOIN CAPITAL</p>
           </div>
-          <div className="landmark-footer__navigation">
-            <nav className="landmark-footer__docs" aria-label="Documentation links">
+          <div className="shiny-footer__navigation">
+            <nav className="shiny-footer__docs" aria-label="Documentation links">
               <a href="https://docs.arc.io" target="_blank" rel="noreferrer">ARC DOCS ↗</a>
               <a href="https://testnet.arcscan.app" target="_blank" rel="noreferrer">ARCSCAN ↗</a>
               <a
@@ -256,31 +256,31 @@ function LandingFooter({ onLaunch }: { onLaunch: () => void }) {
                 SHINY DOCS ↗
               </a>
             </nav>
-            <div className="landmark-footer__socials" aria-label="Community links">
+            <div className="shiny-footer__socials" aria-label="Community links">
               <a
-                className="landmark-footer__social-link"
+                className="shiny-footer__social-link"
                 href="https://x.com/Shiny_xyz"
                 target="_blank"
                 rel="noreferrer"
                 aria-label="Shiny on X"
               >
-                <svg className="landmark-footer__social-icon" aria-hidden="true">
+                <svg className="shiny-footer__social-icon" aria-hidden="true">
                   <use href="/icons.svg#x-icon" />
                 </svg>
               </a>
               <button
-                className="landmark-footer__social-link"
+                className="shiny-footer__social-link"
                 type="button"
                 aria-disabled="true"
                 aria-label="Discord coming soon"
                 aria-describedby="discord-coming-soon"
               >
-                <svg className="landmark-footer__social-icon" aria-hidden="true">
+                <svg className="shiny-footer__social-icon" aria-hidden="true">
                   <use href="/icons.svg#discord-icon" />
                 </svg>
                 <span
                   id="discord-coming-soon"
-                  className="landmark-footer__social-tooltip"
+                  className="shiny-footer__social-tooltip"
                   role="tooltip"
                 >
                   COMING SOON
@@ -290,10 +290,10 @@ function LandingFooter({ onLaunch }: { onLaunch: () => void }) {
           </div>
         </div>
         <FooterAsciiField />
-        <div className="landmark-footer__wordmark" aria-hidden="true">
+        <div className="shiny-footer__wordmark" aria-hidden="true">
           SHINY
         </div>
-        <div className="landmark-footer__bottom">
+        <div className="shiny-footer__bottom">
           <span>© 2026 SHINY</span>
           <span>BUILT ON ARC TESTNET</span>
           <span>TESTNET TOKENS HAVE NO VALUE</span>
@@ -353,10 +353,10 @@ export function LandingPage({
   }, [onHeaderExitProgressChange, onHeaderThemeChange]);
 
   return (
-    <div className="landmark-page">
-      <section className="landmark-hero landmark-theme-dark" data-header-theme="dark">
-        <div className="landmark-hero__copy">
-          <p className="landmark-kicker">FUNDED TESTNET REWARDS · ARC TESTNET</p>
+    <div className="shiny-page">
+      <section className="shiny-hero shiny-theme-dark" data-header-theme="dark">
+        <div className="shiny-hero__copy">
+          <p className="shiny-kicker">FUNDED TESTNET REWARDS · ARC TESTNET</p>
           <motion.h1
             initial={{ opacity: 0, y: 36 }}
             animate={{ opacity: 1, y: 0 }}
@@ -365,7 +365,7 @@ export function LandingPage({
             Your capital<br />should keep<br />moving
           </motion.h1>
           <motion.p
-            className="landmark-hero__body"
+            className="shiny-hero__body"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.18 }}
@@ -373,7 +373,7 @@ export function LandingPage({
             Stake USDC or EURC, earn funded testnet rewards, and borrow without putting your position to sleep
           </motion.p>
           <motion.div
-            className="landmark-hero__actions"
+            className="shiny-hero__actions"
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.28 }}
@@ -381,13 +381,13 @@ export function LandingPage({
             <LandingLaunchButton onLaunch={onLaunch} />
           </motion.div>
         </div>
-        <div className="landmark-hero__visual">
+        <div className="shiny-hero__visual">
           <AsciiCoinField />
         </div>
       </section>
 
-      <section id="markets-section" className="landmark-markets landmark-theme-dark" data-header-theme="dark">
-        <div className="landmark-markets__rail">
+      <section id="markets-section" className="shiny-markets shiny-theme-dark" data-header-theme="dark">
+        <div className="shiny-markets__rail">
           <h2>Two markets<br />One productive<br />balance</h2>
           <p>Vault parameters are read directly from the deployed Arc Testnet contract</p>
         </div>
