@@ -152,14 +152,17 @@ export function StakeDrawer({
     if (!stakeTx.isSuccess || !hash || syncedStakeHash.current === hash) return;
 
     syncedStakeHash.current = hash;
-    void Promise.all([
+    // A confirmed stake is the end of this flow. Close immediately so the
+    // drawer exits smoothly instead of briefly rendering a success state while
+    // the dashboard queries are refreshing in the background.
+    onClose();
+    void Promise.allSettled([
       refreshProtocolData(),
-      refreshAssetState(),
       Promise.resolve(onTransactionConfirmed?.()),
     ]);
   }, [
     onTransactionConfirmed,
-    refreshAssetState,
+    onClose,
     refreshProtocolData,
     stakeTx.isSuccess,
     stakeWrite.data,
