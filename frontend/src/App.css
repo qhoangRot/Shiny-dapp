@@ -4368,7 +4368,7 @@ html, body {
   border-radius: 50%;
   background: var(--landing-purple);
   box-shadow: 0 0 0 5px rgba(155, 93, 229, 0.1);
-  animation: landmarkCapitalSignal 5.4s cubic-bezier(0.55, 0, 0.25, 1) infinite;
+  animation: shinyCapitalSignal 5.4s cubic-bezier(0.55, 0, 0.25, 1) infinite;
 }
 
 .shiny-cta__capital-node {
@@ -4454,7 +4454,7 @@ html, body {
   letter-spacing: 0.06em;
 }
 
-@keyframes landmarkCapitalSignal {
+@keyframes shinyCapitalSignal {
   0%,
   8% {
     left: 3%;
