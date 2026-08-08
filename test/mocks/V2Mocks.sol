@@ -151,6 +151,8 @@ contract MockInsuranceFundV2 is IInsuranceFundV2 {
             principal[user][asset] = amount;
         }
 
+        function notifyReward(address, uint256) external {}
+
         function getSeizablePrincipal(address user, address asset, uint256[] calldata) external view returns (uint256) {
             return principal[user][asset];
         }

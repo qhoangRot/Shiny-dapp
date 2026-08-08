@@ -22,4 +22,9 @@ interface IInsuranceFundV2 {
 
     error Unauthorized();
     error InsufficientInsuranceBalance();
+    error ZeroAddress();
+    error ZeroAmount();
+    error DependencyAlreadySet();
+    error InsufficientContributionReceived();
+    error TokenReceiptMismatch();
 }

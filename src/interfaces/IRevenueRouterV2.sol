@@ -17,4 +17,8 @@ interface IRevenueRouterV2 {
 
     error Unauthorized();
     error ZeroAmount();
+    error ZeroAddress();
+    error DependencyAlreadySet();
+    error InsufficientRevenueReceived();
+    error TokenReceiptMismatch();
 }

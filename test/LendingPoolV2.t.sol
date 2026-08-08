@@ -80,7 +80,7 @@ contract LendingPoolV2Test is Test {
         assertEq(usdc.balanceOf(liquidator) - liquidatorCollateralBefore, collateralSeized, "recipient mismatch");
 
         (uint256 principal,,,) = pool.loans(alice, address(eurc));
-        (,,, uint256 remainingPrincipal,,,,) = vault.positions(positionId);
+        (,,, uint256 remainingPrincipal,,,,,) = vault.positions(positionId);
         assertEq(principal, 350 * UNIT, "loan principal mismatch");
         assertEq(remainingPrincipal, 1_000 * UNIT - collateralSeized, "position principal mismatch");
         assertLe(collateralSeized, 1_000 * UNIT, "selected collateral exceeded");
@@ -99,7 +99,7 @@ contract LendingPoolV2Test is Test {
         assertLe(covered, requested);
         assertLe(covered, 350 * UNIT);
         assertLe(seized, 1_000 * UNIT);
-        (,,, uint256 remainingPrincipal,,,,) = vault.positions(positionId);
+        (,,, uint256 remainingPrincipal,,,,,) = vault.positions(positionId);
         assertEq(remainingPrincipal + seized, 1_000 * UNIT);
     }
 

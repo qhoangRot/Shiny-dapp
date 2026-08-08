@@ -4,6 +4,8 @@ pragma solidity 0.8.24;
 /// @title IStakingVaultV2
 /// @notice Frozen collateral-seizure and reward-index ABI for Shiny V2.
 interface IStakingVaultV2 {
+    function notifyReward(address asset, uint256 amount) external;
+
     function getSeizablePrincipal(address user, address asset, uint256[] calldata positionIds)
         external
         view

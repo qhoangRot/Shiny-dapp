@@ -8,6 +8,7 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IStakingVaultV2} from "./interfaces/IStakingVaultV2.sol";
+import {IInsuranceFundV2} from "./interfaces/IInsuranceFundV2.sol";
 
 interface ILendingPoolWithdrawalValidatorV2 {
     function validateWithdrawal(address user, address asset, uint256 amount) external;
@@ -24,6 +25,9 @@ contract StakingVaultV2 is IStakingVaultV2, Ownable, Pausable, ReentrancyGuard {
     uint256 public constant MAX_POSITION_IDS = 32;
     uint256 public constant GROWTH_LOCK = 180 days;
     uint256 public constant DIAMOND_LOCK = 365 days;
+    uint256 public constant PENALTY_FREE_PERIOD = 90 days;
+    uint256 public constant PENALTY_FULL_PERIOD = 365 days;
+    uint256 private constant BPS_DENOMINATOR = 10_000;
 
     enum Tier {
         Flexible,
@@ -36,6 +40,7 @@ contract StakingVaultV2 is IStakingVaultV2, Ownable, Pausable, ReentrancyGuard {
         address asset;
         Tier tier;
         uint256 principal;
+        uint256 stakedAt;
         uint256 unlockTime;
         uint256 pendingReward;
         uint256 rewardDebt;
@@ -46,6 +51,7 @@ contract StakingVaultV2 is IStakingVaultV2, Ownable, Pausable, ReentrancyGuard {
     address public immutable eurc;
     address public lendingPool;
     address public revenueRouter;
+    address public insuranceFund;
 
     uint256 public nextPositionId = 1;
     mapping(uint256 => Position) public positions;
@@ -67,8 +73,12 @@ contract StakingVaultV2 is IStakingVaultV2, Ownable, Pausable, ReentrancyGuard {
     event RewardNotified(address indexed asset, uint256 received, uint256 distributed);
     event RewardClaimed(uint256 indexed positionId, address indexed user, uint256 amount);
     event Withdrawn(uint256 indexed positionId, address indexed user, uint256 principal, uint256 reward);
+    event RewardForfeited(
+        uint256 indexed positionId, address indexed user, address indexed asset, uint256 amount, uint256 penaltyBps
+    );
     event LendingPoolSet(address indexed lendingPool);
     event RevenueRouterSet(address indexed revenueRouter);
+    event InsuranceFundSet(address indexed insuranceFund);
 
     error Unauthorized();
     error UnsupportedAsset();
@@ -77,6 +87,7 @@ contract StakingVaultV2 is IStakingVaultV2, Ownable, Pausable, ReentrancyGuard {
     error NoReward();
     error TokenReceiptMismatch();
     error InsufficientRewardFunding();
+    error InsuranceFundNotSet();
 
     constructor(address initialOwner, address usdcAddress, address eurcAddress) Ownable(initialOwner) {
         if (initialOwner == address(0) || usdcAddress == address(0) || eurcAddress == address(0)) {
@@ -109,6 +120,15 @@ contract StakingVaultV2 is IStakingVaultV2, Ownable, Pausable, ReentrancyGuard {
         if (revenueRouter != address(0)) revert DependencyAlreadySet();
         revenueRouter = revenueRouterAddress;
         emit RevenueRouterSet(revenueRouterAddress);
+    }
+
+    /// @notice Sets the only contract permitted to receive forfeited rewards.
+    /// @dev Set once to avoid redirecting user-earned rewards after deployment.
+    function setInsuranceFund(address insuranceFundAddress) external onlyOwner {
+        if (insuranceFundAddress == address(0)) revert ZeroAddress();
+        if (insuranceFund != address(0)) revert DependencyAlreadySet();
+        insuranceFund = insuranceFundAddress;
+        emit InsuranceFundSet(insuranceFundAddress);
     }
 
     function pause() external onlyOwner {
@@ -145,6 +165,7 @@ contract StakingVaultV2 is IStakingVaultV2, Ownable, Pausable, ReentrancyGuard {
             asset: asset,
             tier: tier,
             principal: amount,
+            stakedAt: block.timestamp,
             unlockTime: unlockTime,
             pendingReward: 0,
             rewardDebt: Math.mulDiv(weightedPrincipal, accRewardPerWeightedShare[asset], REWARD_PRECISION),
@@ -161,7 +182,7 @@ contract StakingVaultV2 is IStakingVaultV2, Ownable, Pausable, ReentrancyGuard {
     /// @dev If the pool was empty, rewards remain undistributed. The first staker present
     ///      immediately before the next notification participates in all of that backlog.
     ///      This is accepted behavior because no account was eligible while the pool was empty.
-    function notifyReward(address asset, uint256 amount) external onlyRevenueRouter nonReentrant {
+    function notifyReward(address asset, uint256 amount) external override onlyRevenueRouter nonReentrant {
         _requireSupportedAsset(asset);
         if (amount == 0) revert ZeroAmount();
 
@@ -208,26 +229,18 @@ contract StakingVaultV2 is IStakingVaultV2, Ownable, Pausable, ReentrancyGuard {
         // forge-lint: disable-next-line(block-timestamp)
         if (position.unlockTime != 0 && block.timestamp < position.unlockTime) revert PositionLocked();
 
-        _checkpoint(position);
-        principal = position.principal;
-        reward = position.pendingReward;
-        if (principal == 0) revert ZeroAmount();
+        return _withdrawWithPenalty(positionId, position);
+    }
 
-        if (lendingPool != address(0)) {
-            ILendingPoolWithdrawalValidatorV2(lendingPool).validateWithdrawal(msg.sender, position.asset, principal);
-        }
+    /// @notice Withdraws principal before a Growth/Diamond lock expires.
+    /// @dev Reward vesting is identical to withdraw(): every tier applies the same
+    ///      holding-duration penalty. This function differs only by bypassing unlockTime.
+    function emergencyWithdraw(uint256 positionId) external nonReentrant returns (uint256 principal, uint256 reward) {
+        Position storage position = _position(positionId);
+        if (position.owner != msg.sender) revert PositionNotOwnedByUser();
+        if (position.withdrawn) revert PositionAlreadyWithdrawn();
 
-        uint256 weightedPrincipal = _weightedPrincipal(position.principal, position.tier);
-        totalPrincipal[position.asset] -= principal;
-        totalWeightedPrincipal[position.asset] -= weightedPrincipal;
-        if (reward != 0) rewardReserve[position.asset] -= reward;
-        position.principal = 0;
-        position.pendingReward = 0;
-        position.rewardDebt = 0;
-        position.withdrawn = true;
-
-        IERC20(position.asset).safeTransfer(msg.sender, principal + reward);
-        emit Withdrawn(positionId, msg.sender, principal, reward);
+        return _withdrawWithPenalty(positionId, position);
     }
 
     function pendingReward(uint256 positionId) external view returns (uint256) {
@@ -343,6 +356,66 @@ contract StakingVaultV2 is IStakingVaultV2, Ownable, Pausable, ReentrancyGuard {
             position.pendingReward += accumulated - position.rewardDebt;
         }
         position.rewardDebt = accumulated;
+    }
+
+    /// @dev Shared withdrawal path: only the caller's lock validation differs between
+    ///      withdraw and emergencyWithdraw. Principal is never penalized.
+    function _withdrawWithPenalty(uint256 positionId, Position storage position)
+        internal
+        returns (uint256 principal, uint256 reward)
+    {
+        _checkpoint(position);
+        principal = position.principal;
+        uint256 accruedReward = position.pendingReward;
+        if (principal == 0) revert ZeroAmount();
+
+        if (lendingPool != address(0)) {
+            ILendingPoolWithdrawalValidatorV2(lendingPool).validateWithdrawal(msg.sender, position.asset, principal);
+        }
+
+        uint256 penaltyBps = _penaltyBps(position.stakedAt);
+        uint256 forfeiture = Math.mulDiv(accruedReward, penaltyBps, BPS_DENOMINATOR);
+        reward = accruedReward - forfeiture;
+
+        uint256 weightedPrincipal = _weightedPrincipal(principal, position.tier);
+        totalPrincipal[position.asset] -= principal;
+        totalWeightedPrincipal[position.asset] -= weightedPrincipal;
+        if (accruedReward != 0) rewardReserve[position.asset] -= accruedReward;
+        position.principal = 0;
+        position.pendingReward = 0;
+        position.rewardDebt = 0;
+        position.withdrawn = true;
+
+        if (forfeiture != 0) {
+            if (insuranceFund == address(0)) revert InsuranceFundNotSet();
+            _transferExact(position.asset, insuranceFund, forfeiture);
+            IInsuranceFundV2(insuranceFund).notifyForfeiture(position.asset, forfeiture);
+            emit RewardForfeited(positionId, msg.sender, position.asset, forfeiture, penaltyBps);
+        }
+        _transferExact(position.asset, msg.sender, principal + reward);
+        emit Withdrawn(positionId, msg.sender, principal, reward);
+    }
+
+    function _penaltyBps(uint256 stakedAt) internal view returns (uint256) {
+        // forge-lint: disable-next-line(block-timestamp)
+        uint256 elapsed = block.timestamp - stakedAt;
+        if (elapsed <= PENALTY_FREE_PERIOD) return BPS_DENOMINATOR;
+        if (elapsed >= PENALTY_FULL_PERIOD) return 0;
+        return Math.mulDiv(PENALTY_FULL_PERIOD - elapsed, BPS_DENOMINATOR, PENALTY_FULL_PERIOD - PENALTY_FREE_PERIOD);
+    }
+
+    function _transferExact(address asset, address recipient, uint256 amount) internal {
+        if (amount == 0) return;
+        uint256 vaultBalanceBefore = IERC20(asset).balanceOf(address(this));
+        uint256 recipientBalanceBefore = IERC20(asset).balanceOf(recipient);
+        IERC20(asset).safeTransfer(recipient, amount);
+        uint256 vaultBalanceAfter = IERC20(asset).balanceOf(address(this));
+        uint256 recipientBalanceAfter = IERC20(asset).balanceOf(recipient);
+        if (
+            vaultBalanceBefore - vaultBalanceAfter != amount || recipientBalanceAfter - recipientBalanceBefore != amount
+        ) {
+            revert TokenReceiptMismatch();
+        }
     }
 
     function _validatePositionIds(uint256[] calldata positionIds) internal pure {
