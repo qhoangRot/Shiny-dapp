@@ -162,10 +162,10 @@ contract LendingPoolV2 is ILendingPoolV2, Ownable, Pausable, ReentrancyGuard {
         _configureBorrowPair(collateralAsset, debtAsset, enabled);
     }
 
-    function setBorrowAssetPaused(address debtAsset, bool paused) external onlyOwner {
+    function setBorrowAssetPaused(address debtAsset, bool isPaused) external onlyOwner {
         _requireSupportedAsset(debtAsset);
-        governanceBorrowPaused[debtAsset] = paused;
-        emit BorrowAssetPauseUpdated(debtAsset, paused);
+        governanceBorrowPaused[debtAsset] = isPaused;
+        emit BorrowAssetPauseUpdated(debtAsset, isPaused);
     }
 
     function setBorrowRatePerSecond(address debtAsset, uint256 newRate) external onlyOwner {

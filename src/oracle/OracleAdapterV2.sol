@@ -66,7 +66,8 @@ contract OracleAdapterV2 is IOracleV2, Ownable, Pausable {
 
     function unpause() external onlyOwner {
         _unpause();
-        for (uint256 i; i < _configuredAssets.length; ++i) {
+        uint256 length = _configuredAssets.length;
+        for (uint256 i; i < length; ++i) {
             address asset = _configuredAssets[i];
             emit OracleHealthChanged(asset, isHealthy(asset));
         }
@@ -101,7 +102,8 @@ contract OracleAdapterV2 is IOracleV2, Ownable, Pausable {
     }
 
     function _emitGlobalHealth(bool healthy) internal {
-        for (uint256 i; i < _configuredAssets.length; ++i) {
+        uint256 length = _configuredAssets.length;
+        for (uint256 i; i < length; ++i) {
             emit OracleHealthChanged(_configuredAssets[i], healthy);
         }
     }
