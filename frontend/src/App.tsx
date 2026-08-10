@@ -29,7 +29,6 @@ function App() {
   const [landingHeaderTheme, setLandingHeaderTheme] = useState<'dark' | 'light'>('dark');
   const [curtainActive, setCurtainActive] = useState(false);
   const curtainTimers = useRef<number[]>([]);
-  const connectIntentUntilRef = useRef(0);
   const landingHeaderRef = useRef<HTMLElement>(null);
   const showApp = isConnected && view !== 'landing';
 
@@ -63,18 +62,6 @@ function App() {
       window.setTimeout(() => setCurtainActive(false), 1_350),
     ];
   }, [curtainActive, goApp]);
-
-  const markConnectIntent = useCallback(() => {
-    // A persisted wallet reconnect must stay on Landing. Only a connection
-    // explicitly started from Shiny may enter the protocol automatically.
-    connectIntentUntilRef.current = Date.now() + 120_000;
-  }, []);
-
-  useEffect(() => {
-    if (!isConnected || chainId !== 5042002 || Date.now() > connectIntentUntilRef.current) return;
-    connectIntentUntilRef.current = 0;
-    launchApp();
-  }, [chainId, isConnected, launchApp]);
 
   const renderAppView = () => {
     switch (view) {
@@ -140,7 +127,6 @@ function App() {
           ) : (
             <LandingLaunchButton
               onLaunch={launchApp}
-              onConnectIntent={markConnectIntent}
               compact
             />
           )}
@@ -172,7 +158,6 @@ function App() {
               <SmoothScroll>
                 <LandingPage
                   onLaunch={launchApp}
-                  onConnectIntent={markConnectIntent}
                   onHeaderThemeChange={setLandingHeaderTheme}
                   onHeaderExitProgressChange={updateLandingHeaderExit}
                 />
