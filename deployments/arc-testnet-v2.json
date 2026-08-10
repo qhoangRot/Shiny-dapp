@@ -1,0 +1,49 @@
+{
+  "network": "Arc Testnet",
+  "chainId": 5042002,
+  "deployedAt": "2026-08-09",
+  "deployer": "0x6f4C48e5d6cA3EBB593b836938E9f89DBBa12574",
+  "treasury": "0x6f4C48e5d6cA3EBB593b836938E9f89DBBa12574",
+  "assets": {
+    "usdc": "0x3600000000000000000000000000000000000000",
+    "eurc": "0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a"
+  },
+  "contracts": {
+    "stakingVaultV2": "0x483B0ef4604e0451D2F3FC9020c5301204dB8790",
+    "oracleAdapterV2": "0x1Ed00f4a622e76478ae3D880b1e9f87E60a3F8fd",
+    "revenueRouterV2": "0x9ca3Cea97D9061b207B5430BcDc3De3ADdF5B46a",
+    "insuranceFundV2": "0x52E8654c0a59D7448F0Bf4b43E9D13AcAe5C6082",
+    "lendingPoolV2": "0x4dc2C209cBb15A85Aa598205B30c1f32395E6493"
+  },
+  "oracle": {
+    "usdcPriceWad": "1000000000000000000",
+    "eurcPriceWad": "1080000000000000000",
+    "healthyAfterDeployment": true,
+    "lastRefreshedAt": "2026-08-10"
+  },
+  "lending": {
+    "borrowRatePerSecond": {
+      "usdc": "1268391679",
+      "eurc": "1585489599"
+    },
+    "targetBorrowApr": {
+      "usdc": "4%",
+      "eurc": "5%"
+    }
+  },
+  "verification": {
+    "setOnceDependenciesVerified": true,
+    "v1ContractsModified": false,
+    "testFlow": "Fund 2 EURC liquidity; stake 2 USDC and 1 EURC Flexible; borrow 1 EURC; repay; settle EURC revenue.",
+    "revenueSettledEurcRaw": "12000",
+    "revenueSplitEurcRaw": {
+      "stakers": "7800",
+      "treasury": "1800",
+      "insurance": "1200",
+      "creditReserve": "1200"
+    },
+    "debtAfterRepay": "0",
+    "pendingRevenueAfterSettlement": "0",
+    "borrowRatePerSecondAfterTest": "0"
+  }
+}
