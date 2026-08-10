@@ -29,6 +29,7 @@ function App() {
   const [landingHeaderTheme, setLandingHeaderTheme] = useState<'dark' | 'light'>('dark');
   const [curtainActive, setCurtainActive] = useState(false);
   const curtainTimers = useRef<number[]>([]);
+  const connectIntentUntilRef = useRef(0);
   const landingHeaderRef = useRef<HTMLElement>(null);
   const showApp = isConnected && view !== 'landing';
 
@@ -43,10 +44,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (isConnected) setView('app');
-  }, [isConnected]);
-
-  useEffect(() => {
     return () => curtainTimers.current.forEach((timer) => window.clearTimeout(timer));
   }, []);
 
@@ -55,9 +52,9 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const goApp = () => setView('app');
+  const goApp = useCallback(() => setView('app'), []);
 
-  const launchApp = () => {
+  const launchApp = useCallback(() => {
     if (curtainActive) return;
     curtainTimers.current.forEach((timer) => window.clearTimeout(timer));
     setCurtainActive(true);
@@ -65,7 +62,19 @@ function App() {
       window.setTimeout(goApp, 520),
       window.setTimeout(() => setCurtainActive(false), 1_350),
     ];
-  };
+  }, [curtainActive, goApp]);
+
+  const markConnectIntent = useCallback(() => {
+    // A persisted wallet reconnect must stay on Landing. Only a connection
+    // explicitly started from Shiny may enter the protocol automatically.
+    connectIntentUntilRef.current = Date.now() + 120_000;
+  }, []);
+
+  useEffect(() => {
+    if (!isConnected || chainId !== 5042002 || Date.now() > connectIntentUntilRef.current) return;
+    connectIntentUntilRef.current = 0;
+    launchApp();
+  }, [chainId, isConnected, launchApp]);
 
   const renderAppView = () => {
     switch (view) {
@@ -129,7 +138,11 @@ function App() {
               <ConnectButton showBalance={false} />
             </>
           ) : (
-            <LandingLaunchButton onLaunch={launchApp} compact />
+            <LandingLaunchButton
+              onLaunch={launchApp}
+              onConnectIntent={markConnectIntent}
+              compact
+            />
           )}
         </div>
       </header>
@@ -159,6 +172,7 @@ function App() {
               <SmoothScroll>
                 <LandingPage
                   onLaunch={launchApp}
+                  onConnectIntent={markConnectIntent}
                   onHeaderThemeChange={setLandingHeaderTheme}
                   onHeaderExitProgressChange={updateLandingHeaderExit}
                 />

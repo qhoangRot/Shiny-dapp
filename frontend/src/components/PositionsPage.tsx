@@ -4,10 +4,14 @@ import { useAccount, useReadContracts } from 'wagmi';
 import { CONTRACTS, lendingPoolAbi } from '../config/contracts';
 import { usePositions } from '../hooks/usePositions';
 import { usePositionRewards } from '../hooks/usePositionRewards';
+import { useV2Positions } from '../hooks/useV2Positions';
+import { useV2PositionRewards } from '../hooks/useV2PositionRewards';
+import { useV2Loans } from '../hooks/useV2Loans';
 import { useRefreshProtocolData } from '../hooks/useRefreshProtocolData';
-import { StakePositionRow } from './Dashboard';
+import { StakePositionRow, V2StakePositionRow } from './Dashboard';
 import { InfoTip } from './InfoTip';
 import { RepayDrawer } from './RepayDrawer';
+import { V2RepayDrawer } from './V2RepayDrawer';
 import { TokenIcon } from './TokenIcon';
 
 type PositionTab = 'stakes' | 'borrows';
@@ -21,15 +25,18 @@ function tokenSymbol(asset: string): 'USDC' | 'EURC' {
 export function PositionsPage() {
   const { address } = useAccount();
   const { positions, isLoading, refetch } = usePositions();
+  const { positions: v2Positions, isLoading: v2Loading, refetch: refetchV2 } = useV2Positions();
   const {
     getReward,
     isLoading: rewardsLoading,
     refreshAfterClaim,
   } = usePositionRewards(positions);
+  const { getReward: getV2Reward, refetchRewards: refetchV2Rewards } = useV2PositionRewards(v2Positions);
   const [tab, setTab] = useState<PositionTab>('stakes');
   const [assetFilter, setAssetFilter] = useState<AssetFilter>('all');
   const [sortMode, setSortMode] = useState<SortMode>('newest');
-  const [selectedRepayAsset, setSelectedRepayAsset] = useState<'USDC' | 'EURC' | null>(null);
+  const [selectedRepayAsset, setSelectedRepayAsset] = useState<{ asset: 'USDC' | 'EURC'; deployment: 'v1' | 'v2' } | null>(null);
+  const v2LoansState = useV2Loans(selectedRepayAsset === null);
   const refreshProtocolData = useRefreshProtocolData();
   const refreshRetryRef = useRef<number | null>(null);
 
@@ -46,7 +53,7 @@ export function PositionsPage() {
       : [],
     query: {
       enabled: !!address,
-      refetchInterval: selectedRepayAsset === null ? 30_000 : false,
+      refetchInterval: selectedRepayAsset === null ? 10_000 : false,
     },
   });
 
@@ -54,7 +61,7 @@ export function PositionsPage() {
     await Promise.all([
       refreshProtocolData(),
       refetchLoans(),
-      refetch(),
+      refetch(), refetchV2(), refetchV2Rewards(), v2LoansState.refetch(),
     ]);
 
     if (refreshRetryRef.current !== null) {
@@ -68,7 +75,7 @@ export function PositionsPage() {
       ]);
       refreshRetryRef.current = null;
     }, 700);
-  }, [refetch, refetchLoans, refreshProtocolData]);
+  }, [refetch, refetchLoans, refreshProtocolData, refetchV2, refetchV2Rewards, v2LoansState]);
 
   useEffect(() => () => {
     if (refreshRetryRef.current !== null) {
@@ -77,9 +84,7 @@ export function PositionsPage() {
   }, []);
 
   const visiblePositions = useMemo(() => {
-    const filtered = assetFilter === 'all'
-      ? [...positions]
-      : positions.filter((position) => tokenSymbol(position.asset) === assetFilter);
+    const filtered = assetFilter === 'all' ? [...positions] : positions.filter((position) => tokenSymbol(position.asset) === assetFilter);
 
     return filtered.sort((a, b) => {
       if (sortMode === 'reward') {
@@ -99,6 +104,10 @@ export function PositionsPage() {
     });
   }, [assetFilter, getReward, positions, sortMode]);
 
+  const visibleV2Positions = useMemo(() => assetFilter === 'all'
+    ? v2Positions
+    : v2Positions.filter((position) => tokenSymbol(position.asset) === assetFilter), [assetFilter, v2Positions]);
+
   const loans = [
     { symbol: 'USDC' as const, result: loanData?.[0]?.result },
     { symbol: 'EURC' as const, result: loanData?.[1]?.result },
@@ -114,6 +123,10 @@ export function PositionsPage() {
       };
     })
     .filter((loan) => loan.active || loan.debt > 0n);
+  const allLoans = [
+    ...loans.map((loan) => ({ ...loan, deployment: 'v1' as const })),
+    ...v2LoansState.loans.map((loan) => ({ symbol: loan.asset, principal: loan.principal, interest: loan.storedInterest + loan.pendingInterest, debt: loan.debt, active: loan.active, deployment: 'v2' as const })),
+  ];
 
   return (
     <section className="protocol-page">
@@ -123,15 +136,15 @@ export function PositionsPage() {
           <h2>My Positions</h2>
           <p className="text-secondary">Review every active stake and borrow position in one place.</p>
         </div>
-        <span className="position-count">{positions.length} active stake{positions.length === 1 ? '' : 's'}</span>
+        <span className="position-count">{positions.length + v2Positions.length} active stake{positions.length + v2Positions.length === 1 ? '' : 's'}</span>
       </div>
 
       <div className="page-tabs" role="tablist" aria-label="Position type">
         <button className={tab === 'stakes' ? 'active' : ''} onClick={() => setTab('stakes')} role="tab">
-          Stakes <span>{positions.length}</span>
+          Stakes <span>{positions.length + v2Positions.length}</span>
         </button>
         <button className={tab === 'borrows' ? 'active' : ''} onClick={() => setTab('borrows')} role="tab">
-          Borrows <span>{loans.length}</span>
+          Borrows <span>{allLoans.length}</span>
         </button>
       </div>
 
@@ -157,9 +170,9 @@ export function PositionsPage() {
           </div>
 
           <div className="protocol-table-card glass-panel">
-            {isLoading ? (
+            {isLoading || v2Loading ? (
               <div className="page-empty-state">Loading your staking positions...</div>
-            ) : visiblePositions.length === 0 ? (
+            ) : visiblePositions.length + visibleV2Positions.length === 0 ? (
               <div className="page-empty-state">
                 <strong>No matching positions</strong>
                 <span>Try another asset filter or open a new stake from Markets.</span>
@@ -170,10 +183,11 @@ export function PositionsPage() {
                   <tr>
                     <th>Asset</th>
                     <th>Vault</th>
+                    <th>Protocol</th>
                     <th className="numeric-cell">Principal</th>
                     <th className="numeric-cell">
                       Claimable reward
-                      <InfoTip text="Claimable rewards come from a separately funded testnet program, are paid in the staked token, and refresh about every 8 seconds." />
+                      <InfoTip text="Claimable rewards come from a separately funded testnet program, are paid in the staked token, and refresh about every 5 seconds." />
                     </th>
                     <th>
                       Lock status
@@ -193,6 +207,9 @@ export function PositionsPage() {
                       onDone={refetch}
                     />
                   ))}
+                  {visibleV2Positions.map((position) => (
+                    <V2StakePositionRow key={`v2-${position.id}`} position={position} reward={getV2Reward(position)} onDone={refetchV2} />
+                  ))}
                 </tbody>
               </table>
             )}
@@ -202,7 +219,7 @@ export function PositionsPage() {
         <div className="protocol-table-card glass-panel">
           {loansLoading ? (
             <div className="page-empty-state">Loading your borrow positions...</div>
-          ) : loans.length === 0 ? (
+          ) : allLoans.length === 0 ? (
             <div className="page-empty-state">
               <strong>No active borrows</strong>
               <span>Your staked assets can be used as collateral from the Markets page.</span>
@@ -212,6 +229,7 @@ export function PositionsPage() {
               <thead>
                 <tr>
                   <th>Asset</th>
+                  <th>Protocol</th>
                   <th className="numeric-cell">Principal</th>
                   <th className="numeric-cell">Accrued interest</th>
                   <th className="numeric-cell">Current debt</th>
@@ -220,9 +238,10 @@ export function PositionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {loans.map((loan) => (
-                  <tr key={loan.symbol}>
+                {allLoans.map((loan) => (
+                  <tr key={`${loan.deployment}-${loan.symbol}`}>
                     <td><span className="asset-with-icon"><TokenIcon symbol={loan.symbol} size={28} />{loan.symbol}</span></td>
+                    <td><span className={`protocol-badge protocol-badge--${loan.deployment === 'v1' ? 'legacy' : 'v2'}`}>{loan.deployment === 'v1' ? 'Legacy' : 'V2'}</span></td>
                     <td className="numeric-cell">{Number(formatUnits(loan.principal, 6)).toFixed(2)}</td>
                     <td className="numeric-cell">{Number(formatUnits(loan.interest, 6)).toFixed(4)}</td>
                     <td className="numeric-cell">{Number(formatUnits(loan.debt, 6)).toFixed(4)} {loan.symbol}</td>
@@ -233,7 +252,7 @@ export function PositionsPage() {
                         type="button"
                         disabled={loan.debt === 0n}
                         aria-label={`Repay ${loan.symbol}`}
-                        onClick={() => setSelectedRepayAsset(loan.symbol)}
+                        onClick={() => setSelectedRepayAsset({ asset: loan.symbol, deployment: loan.deployment })}
                       >
                         Repay
                       </button>
@@ -247,8 +266,14 @@ export function PositionsPage() {
       )}
 
       <RepayDrawer
-        open={selectedRepayAsset !== null}
-        asset={selectedRepayAsset ?? 'USDC'}
+        open={selectedRepayAsset?.deployment === 'v1'}
+        asset={selectedRepayAsset?.asset ?? 'USDC'}
+        onClose={() => setSelectedRepayAsset(null)}
+        onTransactionConfirmed={refreshAfterRepay}
+      />
+      <V2RepayDrawer
+        open={selectedRepayAsset?.deployment === 'v2'}
+        asset={selectedRepayAsset?.asset ?? 'USDC'}
         onClose={() => setSelectedRepayAsset(null)}
         onTransactionConfirmed={refreshAfterRepay}
       />

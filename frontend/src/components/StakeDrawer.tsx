@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { formatUnits, parseUnits } from 'viem';
-import { useAccount, useReadContracts, useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
-import { CONTRACTS, erc20Abi, stakingVaultAbi } from '../config/contracts';
+import { BaseError, formatUnits, parseUnits } from 'viem';
+import { useAccount, usePublicClient, useReadContracts, useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
+import { CONTRACTS, V2_CONTRACTS, erc20Abi, stakingVaultV2Abi } from '../config/contracts';
 import { useRefreshProtocolData } from '../hooks/useRefreshProtocolData';
 import { TokenIcon } from './TokenIcon';
 
@@ -13,6 +13,28 @@ const TIERS = [
 ];
 
 type Asset = 'USDC' | 'EURC';
+
+function parseTokenAmount(value: string) {
+  if (!value || !/^\d*(?:\.\d{0,6})?$/.test(value)) return 0n;
+  try {
+    return parseUnits(value, 6);
+  } catch {
+    return 0n;
+  }
+}
+
+function transactionErrorMessage(error: unknown) {
+  const message = error instanceof BaseError
+    ? error.shortMessage
+    : error instanceof Error
+      ? error.message
+      : 'The transaction could not be prepared.';
+  if (/user rejected|user denied/i.test(message)) return 'Transaction cancelled in your wallet.';
+  if (/allowance/i.test(message)) return 'Approval is too low for this stake amount.';
+  if (/balance|exceeds balance/i.test(message)) return 'Your wallet balance is too low.';
+  if (/paused/i.test(message)) return 'Staking is temporarily paused.';
+  return message;
+}
 
 interface AssetSnapshot {
   account: `0x${string}`;
@@ -29,7 +51,7 @@ interface ApprovalIntent {
 interface StakeDrawerProps {
   open: boolean;
   onClose: () => void;
-  onTransactionConfirmed?: () => void | Promise<void>;
+  onTransactionConfirmed?: (stake: { asset: Asset; amount: bigint }) => void | Promise<void>;
 }
 
 export function StakeDrawer({
@@ -38,6 +60,7 @@ export function StakeDrawer({
   onTransactionConfirmed,
 }: StakeDrawerProps) {
   const { address } = useAccount();
+  const publicClient = usePublicClient();
   const refreshProtocolData = useRefreshProtocolData();
   const syncedStakeHash = useRef<`0x${string}` | undefined>(undefined);
   const [asset, setAsset] = useState<Asset>('USDC');
@@ -47,9 +70,10 @@ export function StakeDrawer({
   const [readIssue, setReadIssue] = useState<string | null>(null);
   const [pendingApprovalIntent, setPendingApprovalIntent] = useState<ApprovalIntent | null>(null);
   const [approvedIntent, setApprovedIntent] = useState<ApprovalIntent | null>(null);
+  const [transactionError, setTransactionError] = useState<string | null>(null);
 
   const assetAddress = asset === 'USDC' ? CONTRACTS.usdc : CONTRACTS.eurc;
-  const amountWei = amount && !Number.isNaN(Number(amount)) ? parseUnits(amount, 6) : 0n;
+  const amountWei = parseTokenAmount(amount);
 
   const {
     isFetching: readsFetching,
@@ -58,7 +82,7 @@ export function StakeDrawer({
     contracts: address
       ? [
           { address: assetAddress, abi: erc20Abi, functionName: 'balanceOf', args: [address] },
-          { address: assetAddress, abi: erc20Abi, functionName: 'allowance', args: [address, CONTRACTS.stakingVault] },
+          { address: assetAddress, abi: erc20Abi, functionName: 'allowance', args: [address, V2_CONTRACTS.stakingVault] },
         ]
       : [],
     allowFailure: false,
@@ -105,14 +129,16 @@ export function StakeDrawer({
   const readsReady = balance !== undefined && allowance !== undefined;
   const allowanceReady = readsReady && amountWei > 0n && allowance >= amountWei;
   const isValidAmount = readsReady && amountWei > 0n && amountWei <= balance;
-  const approvedInCurrentFlow =
-    approvedIntent?.asset === asset && approvedIntent.amount === amountWei;
-  const exactOnchainApproval =
-    readsReady && amountWei > 0n && allowance === amountWei;
-  const approvedForCurrentAmount =
-    approvedInCurrentFlow || exactOnchainApproval;
-  const approvalVerified = approvedForCurrentAmount && allowanceReady;
+  const approvedInCurrentFlow = approvedIntent?.asset === asset && approvedIntent.amount === amountWei;
+  const approvedForCurrentAmount = allowanceReady || approvedInCurrentFlow;
+  const approvalVerified = allowanceReady;
   const stakeSuccess = stakeTx.isSuccess;
+  const isBusy = approveWrite.isPending || approveTx.isLoading || stakeWrite.isPending || stakeTx.isLoading;
+  const visibleError = transactionError
+    ?? (approveWrite.error ? transactionErrorMessage(approveWrite.error) : null)
+    ?? (approveTx.error ? transactionErrorMessage(approveTx.error) : null)
+    ?? (stakeWrite.error ? transactionErrorMessage(stakeWrite.error) : null)
+    ?? (stakeTx.error ? transactionErrorMessage(stakeTx.error) : null);
 
   useEffect(() => {
     if (!open) {
@@ -122,6 +148,7 @@ export function StakeDrawer({
       setReadIssue(null);
       setPendingApprovalIntent(null);
       setApprovedIntent(null);
+      setTransactionError(null);
       stakeWrite.reset();
       approveWrite.reset();
       return;
@@ -132,6 +159,7 @@ export function StakeDrawer({
     setReadIssue(null);
     setPendingApprovalIntent(null);
     setApprovedIntent(null);
+    setTransactionError(null);
     stakeWrite.reset();
     approveWrite.reset();
     void refreshAssetState();
@@ -152,15 +180,19 @@ export function StakeDrawer({
     if (!stakeTx.isSuccess || !hash || syncedStakeHash.current === hash) return;
 
     syncedStakeHash.current = hash;
+    const confirmedStake = { asset, amount: amountWei };
     // A confirmed stake is the end of this flow. Close immediately so the
     // drawer exits smoothly instead of briefly rendering a success state while
     // the dashboard queries are refreshing in the background.
     onClose();
-    void Promise.allSettled([
-      refreshProtocolData(),
-      Promise.resolve(onTransactionConfirmed?.()),
-    ]);
+    void Promise.resolve(
+      onTransactionConfirmed
+        ? onTransactionConfirmed(confirmedStake)
+        : refreshProtocolData(),
+    );
   }, [
+    amountWei,
+    asset,
     onTransactionConfirmed,
     onClose,
     refreshProtocolData,
@@ -169,35 +201,74 @@ export function StakeDrawer({
   ]);
 
   const updateAmount = (nextAmount: string) => {
+    if (nextAmount && !/^\d*(?:\.\d{0,6})?$/.test(nextAmount)) return;
     setAmount(nextAmount);
+    setTransactionError(null);
     setPendingApprovalIntent(null);
     setApprovedIntent(null);
     approveWrite.reset();
     stakeWrite.reset();
   };
 
-  const handleApprove = () => {
-    if (!isValidAmount) return;
+  const handleApprove = async () => {
+    if (!isValidAmount || !address || !publicClient || isBusy) return;
 
+    setTransactionError(null);
     setPendingApprovalIntent({ asset, amount: amountWei });
     setApprovedIntent(null);
-    approveWrite.writeContract({
-      address: assetAddress,
-      abi: erc20Abi,
-      functionName: 'approve',
-      args: [CONTRACTS.stakingVault, amountWei],
-    });
+    try {
+      const { request } = await publicClient.simulateContract({
+        account: address,
+        address: assetAddress,
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [V2_CONTRACTS.stakingVault, amountWei],
+      });
+      await approveWrite.writeContractAsync(request);
+    } catch (error) {
+      setPendingApprovalIntent(null);
+      setTransactionError(transactionErrorMessage(error));
+    }
   };
 
-  const handleStake = () => {
-    if (!isValidAmount || !approvalVerified) return;
+  const handleStake = async () => {
+    if (!isValidAmount || !approvalVerified || !address || !publicClient || isBusy) return;
 
-    stakeWrite.writeContract({
-      address: CONTRACTS.stakingVault,
-      abi: stakingVaultAbi,
-      functionName: 'stake',
-      args: [assetAddress, amountWei, tier],
-    });
+    setTransactionError(null);
+    try {
+      // Never trust only the cached allowance rendered by the drawer. Arc RPC
+      // nodes can briefly serve a pre-approval state after the receipt has
+      // landed, which otherwise makes the next simulation fail and leaves the
+      // user looking at a misleading "Staking…" state.
+      const confirmedAllowance = await publicClient.readContract({
+        address: assetAddress,
+        abi: erc20Abi,
+        functionName: 'allowance',
+        args: [address, V2_CONTRACTS.stakingVault],
+      });
+      if (confirmedAllowance < amountWei) {
+        setSnapshot((current) => current && current.asset === asset && current.account === address
+          ? { ...current, allowance: confirmedAllowance }
+          : current);
+        setApprovedIntent(null);
+        setTransactionError('Approval is still syncing on Arc. Please approve once more in a moment.');
+        return;
+      }
+      const { request } = await publicClient.simulateContract({
+        account: address,
+        address: V2_CONTRACTS.stakingVault,
+        abi: stakingVaultV2Abi,
+        functionName: 'stake',
+        args: [assetAddress, amountWei, tier],
+      });
+      await stakeWrite.writeContractAsync(request);
+    } catch (error) {
+      setTransactionError(transactionErrorMessage(error));
+    }
+  };
+
+  const handleClose = () => {
+    if (!isBusy) onClose();
   };
 
   return (
@@ -209,7 +280,7 @@ export function StakeDrawer({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={onClose}
+            onClick={handleClose}
           />
           <motion.div
             className="drawer-panel"
@@ -220,7 +291,7 @@ export function StakeDrawer({
           >
             <div className="drawer-header">
               <h3>Stake</h3>
-              <button className="drawer-close" onClick={onClose} aria-label="Close stake drawer">×</button>
+              <button className="drawer-close" onClick={handleClose} aria-label="Close stake drawer" disabled={isBusy}>×</button>
             </div>
 
             {stakeSuccess ? (
@@ -306,6 +377,13 @@ export function StakeDrawer({
                   </div>
                 )}
 
+                {visibleError && (
+                  <div className="stake-read-error" role="alert">
+                    <span>{visibleError}</span>
+                    <button type="button" onClick={() => setTransactionError(null)}>Dismiss</button>
+                  </div>
+                )}
+
                 {readsReady && amountWei > balance && (
                   <p style={{ color: 'var(--color-danger, #E5484D)', fontSize: '0.82rem' }}>
                     Insufficient balance.
@@ -329,7 +407,7 @@ export function StakeDrawer({
                     <button
                       className="cta-button"
                       disabled={!isValidAmount || approveWrite.isPending || approveTx.isLoading}
-                      onClick={handleApprove}
+                      onClick={() => void handleApprove()}
                     >
                       {approveWrite.isPending
                         ? 'Confirm approval in wallet...'
@@ -349,7 +427,7 @@ export function StakeDrawer({
                     <button
                       className="cta-button"
                       disabled={!isValidAmount || !approvalVerified || stakeWrite.isPending || stakeTx.isLoading}
-                      onClick={handleStake}
+                      onClick={() => void handleStake()}
                     >
                       {stakeWrite.isPending
                         ? 'Confirm stake in wallet...'

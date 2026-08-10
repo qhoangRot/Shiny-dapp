@@ -11,7 +11,9 @@ import {IOracleV2} from "../interfaces/IOracleV2.sol";
 /// @dev This contract intentionally does not claim to be a decentralized production oracle.
 ///      It validates manual testnet prices while a production feed adapter is developed.
 contract OracleAdapterV2 is IOracleV2, Ownable, Pausable {
-    uint256 public constant MAX_PRICE_AGE = 1 hours;
+    /// @dev Deliberately relaxed for the manual Arc Testnet price source. This
+    ///      MUST be shortened again when Shiny adopts a production oracle.
+    uint256 public constant MAX_PRICE_AGE = 30 days;
     uint256 public constant MAX_DEVIATION_BPS = 2_000;
     uint256 private constant BPS_DENOMINATOR = 10_000;
 

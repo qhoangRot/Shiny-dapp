@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BaseError, maxUint256 } from 'viem';
+import { BaseError, encodeFunctionData, maxUint256 } from 'viem';
 import {
   useAccount,
   useChainId,
@@ -123,6 +123,8 @@ export function useRepay({
   const [preparing, setPreparing] = useState<'approve' | 'repay' | 'sync' | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [verifiedAllowance, setVerifiedAllowance] = useState<bigint | null>(null);
+  const [fallbackApproveHash, setFallbackApproveHash] = useState<`0x${string}` | undefined>();
+  const [fallbackRepayHash, setFallbackRepayHash] = useState<`0x${string}` | undefined>();
   const syncedApproveHash = useRef<`0x${string}` | undefined>(undefined);
   const syncedRepayHash = useRef<`0x${string}` | undefined>(undefined);
 
@@ -205,9 +207,11 @@ export function useRepay({
   });
 
   const approveWrite = useWriteContract();
-  const approveReceipt = useWaitForTransactionReceipt({ hash: approveWrite.data });
+  const approveHash = approveWrite.data ?? fallbackApproveHash;
+  const approveReceipt = useWaitForTransactionReceipt({ hash: approveHash });
   const repayWrite = useWriteContract();
-  const repayReceipt = useWaitForTransactionReceipt({ hash: repayWrite.data });
+  const repayHash = repayWrite.data ?? fallbackRepayHash;
+  const repayReceipt = useWaitForTransactionReceipt({ hash: repayHash });
 
   useEffect(() => {
     if (!open || !publicClient) return;
@@ -350,6 +354,8 @@ export function useRepay({
 
   const clearError = useCallback(() => {
     setLocalError(null);
+    setFallbackApproveHash(undefined);
+    setFallbackRepayHash(undefined);
     approveWrite.reset();
     repayWrite.reset();
     syncedApproveHash.current = undefined;
@@ -357,7 +363,7 @@ export function useRepay({
   }, [approveWrite, repayWrite]);
 
   useEffect(() => {
-    const hash = approveWrite.data;
+    const hash = approveHash;
     if (!approveReceipt.isSuccess || !hash || syncedApproveHash.current === hash) return;
 
     syncedApproveHash.current = hash;
@@ -393,7 +399,7 @@ export function useRepay({
     address,
     approveReceipt.data?.blockNumber,
     approveReceipt.isSuccess,
-    approveWrite.data,
+    approveHash,
     assetAddress,
     publicClient,
     refetch,
@@ -401,7 +407,7 @@ export function useRepay({
   ]);
 
   useEffect(() => {
-    const hash = repayWrite.data;
+    const hash = repayHash;
     if (!repayReceipt.isSuccess || !hash || syncedRepayHash.current === hash) return;
 
     syncedRepayHash.current = hash;
@@ -416,7 +422,7 @@ export function useRepay({
     onTransactionConfirmed,
     refresh,
     repayReceipt.isSuccess,
-    repayWrite.data,
+    repayHash,
   ]);
 
   const approve = useCallback(async () => {
@@ -434,6 +440,29 @@ export function useRepay({
       });
       await approveWrite.writeContractAsync(request);
     } catch (error) {
+      const provider = (window as Window & {
+        ethereum?: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
+      }).ethereum;
+      const message = error instanceof Error ? error.message : '';
+      if (message.includes('connector.getChainId is not a function') && provider) {
+        try {
+          const data = encodeFunctionData({
+            abi: erc20Abi,
+            functionName: 'approve',
+            args: [CONTRACTS.lendingPool, approvalAmount],
+          });
+          const hash = await provider.request({
+            method: 'eth_sendTransaction',
+            params: [{ from: address, to: assetAddress, data }],
+          });
+          if (typeof hash !== 'string' || !hash.startsWith('0x')) throw new Error('Wallet did not return a transaction hash.');
+          setFallbackApproveHash(hash as `0x${string}`);
+          return;
+        } catch (fallbackError) {
+          setLocalError(messageFromError(fallbackError));
+          return;
+        }
+      }
       setLocalError(messageFromError(error));
     } finally {
       setPreparing(null);
@@ -461,6 +490,29 @@ export function useRepay({
       });
       await repayWrite.writeContractAsync(request);
     } catch (error) {
+      const provider = (window as Window & {
+        ethereum?: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
+      }).ethereum;
+      const message = error instanceof Error ? error.message : '';
+      if (message.includes('connector.getChainId is not a function') && provider) {
+        try {
+          const data = encodeFunctionData({
+            abi: lendingPoolAbi,
+            functionName: 'repay',
+            args: [assetAddress, transactionAmount],
+          });
+          const hash = await provider.request({
+            method: 'eth_sendTransaction',
+            params: [{ from: address, to: CONTRACTS.lendingPool, data }],
+          });
+          if (typeof hash !== 'string' || !hash.startsWith('0x')) throw new Error('Wallet did not return a transaction hash.');
+          setFallbackRepayHash(hash as `0x${string}`);
+          return;
+        } catch (fallbackError) {
+          setLocalError(messageFromError(fallbackError));
+          return;
+        }
+      }
       setLocalError(messageFromError(error));
     } finally {
       setPreparing(null);
@@ -474,10 +526,12 @@ export function useRepay({
     transactionAmount,
   ]);
 
+  const approveConnectorError = fallbackApproveHash && approveWrite.error && messageFromError(approveWrite.error).includes('connector.getChainId is not a function');
+  const repayConnectorError = fallbackRepayHash && repayWrite.error && messageFromError(repayWrite.error).includes('connector.getChainId is not a function');
   const error = localError
-    ?? (approveWrite.error ? messageFromError(approveWrite.error) : null)
+    ?? (!approveConnectorError && approveWrite.error ? messageFromError(approveWrite.error) : null)
     ?? (approveReceipt.error ? messageFromError(approveReceipt.error) : null)
-    ?? (repayWrite.error ? messageFromError(repayWrite.error) : null)
+    ?? (!repayConnectorError && repayWrite.error ? messageFromError(repayWrite.error) : null)
     ?? (repayReceipt.error ? messageFromError(repayReceipt.error) : null)
     ?? (readError ? messageFromError(readError) : null);
 

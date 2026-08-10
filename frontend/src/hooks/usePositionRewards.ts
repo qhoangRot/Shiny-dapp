@@ -67,7 +67,7 @@ export function usePositionRewards(
     query: {
       enabled: Boolean(REWARD_DISTRIBUTOR_ADDRESS) && positions.length > 0,
       staleTime: 4_000,
-      refetchInterval: 8_000,
+      refetchInterval: 5_000,
       refetchIntervalInBackground: false,
     },
   });

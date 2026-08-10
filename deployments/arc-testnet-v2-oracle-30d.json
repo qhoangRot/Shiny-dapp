@@ -1,0 +1,44 @@
+{
+  "network": "Arc Testnet",
+  "chainId": 5042002,
+  "deployedAt": "2026-08-10",
+  "purpose": "V2 replacement with a 30-day manual-testnet oracle freshness window",
+  "deployer": "0x6f4C48e5d6cA3EBB593b836938E9f89DBBa12574",
+  "treasury": "0x6f4C48e5d6cA3EBB593b836938E9f89DBBa12574",
+  "assets": {
+    "usdc": "0x3600000000000000000000000000000000000000",
+    "eurc": "0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a"
+  },
+  "contracts": {
+    "stakingVaultV2": "0xD54C8e3D5BEf1E504719F6a0047547FC0De97926",
+    "oracleAdapterV2": "0x7F542B48a822959C0A08f1be676A889f0c592Eae",
+    "revenueRouterV2": "0x881ae2c48A177763A19552604615Eb65690582cf",
+    "insuranceFundV2": "0x20BE326f887f7552aA674F4734db872d5E2DD211",
+    "lendingPoolV2": "0xADE5a9b19e9aFc204F571f9c9FbE00620cCE5896"
+  },
+  "oracle": {
+    "maxPriceAgeSeconds": "2592000",
+    "maxDeviationBps": "2000",
+    "usdcPriceWad": "1000000000000000000",
+    "eurcPriceWad": "1080000000000000000",
+    "healthyAfterDeployment": true
+  },
+  "lending": {
+    "borrowRatePerSecond": {
+      "usdc": "1268391679",
+      "eurc": "1585489599"
+    },
+    "targetBorrowApr": {
+      "usdc": "4%",
+      "eurc": "5%"
+    }
+  },
+  "verification": {
+    "v1ContractsModified": false,
+    "previousV2StackModified": false,
+    "oracleHealthy": {
+      "usdc": true,
+      "eurc": true
+    }
+  }
+}

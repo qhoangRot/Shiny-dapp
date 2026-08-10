@@ -7,6 +7,35 @@ export const CONTRACTS = {
   rewardDistributor: '0xef6da2daec8f2daf3ff0274a214cfb9eeb4374f2',
 } as const;
 
+// V1 remains live for legacy positions. New stake/borrow flows use V2 below.
+export const V2_CONTRACTS = {
+  stakingVault: '0xD54C8e3D5BEf1E504719F6a0047547FC0De97926',
+  oracleAdapter: '0x7F542B48a822959C0A08f1be676A889f0c592Eae',
+  revenueRouter: '0x881ae2c48A177763A19552604615Eb65690582cf',
+  insuranceFund: '0x20BE326f887f7552aA674F4734db872d5E2DD211',
+  lendingPool: '0xADE5a9b19e9aFc204F571f9c9FbE00620cCE5896',
+} as const;
+
+export const PROTOCOLS = {
+  v1: {
+    deployment: 'v1' as const,
+    label: 'Legacy',
+    stakingVault: CONTRACTS.stakingVault,
+    lendingPool: CONTRACTS.lendingPool,
+    oracle: CONTRACTS.priceOracle,
+    rewardDistributor: CONTRACTS.rewardDistributor,
+  },
+  v2: {
+    deployment: 'v2' as const,
+    label: 'V2',
+    stakingVault: V2_CONTRACTS.stakingVault,
+    lendingPool: V2_CONTRACTS.lendingPool,
+    oracle: V2_CONTRACTS.oracleAdapter,
+    revenueRouter: V2_CONTRACTS.revenueRouter,
+    insuranceFund: V2_CONTRACTS.insuranceFund,
+  },
+} as const;
+
 function optionalContractAddress(value: string | undefined): `0x${string}` | undefined {
   return value
     && !/^0x0{40}$/i.test(value)
@@ -159,6 +188,20 @@ export const stakingVaultAbi = [
 export const rewardDistributorAbi = [
   {
     type: 'function',
+    name: 'reservedByAsset',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'owner',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    type: 'function',
     name: 'pendingReward',
     stateMutability: 'view',
     inputs: [{ name: 'positionId', type: 'uint256' }],
@@ -226,6 +269,13 @@ export const lendingPoolAbi = [
   {
     type: 'function',
     name: 'liquidationThresholdBps',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'liquidationBonusBps',
     stateMutability: 'view',
     inputs: [],
     outputs: [{ name: '', type: 'uint256' }],
@@ -344,4 +394,60 @@ export const erc20Abi = [
     inputs: [{ name: 'account', type: 'address' }],
     outputs: [{ name: '', type: 'uint256' }],
   },
+] as const;
+
+export const stakingVaultV2Abi = [
+  {
+    type: 'function', name: 'userPositionIds', stateMutability: 'view',
+    inputs: [{ name: 'user', type: 'address' }], outputs: [{ name: '', type: 'uint256[]' }],
+  },
+  {
+    type: 'function', name: 'positions', stateMutability: 'view',
+    inputs: [{ name: '', type: 'uint256' }],
+    outputs: [
+      { name: 'owner', type: 'address' }, { name: 'asset', type: 'address' }, { name: 'tier', type: 'uint8' },
+      { name: 'principal', type: 'uint256' }, { name: 'stakedAt', type: 'uint256' }, { name: 'unlockTime', type: 'uint256' },
+      { name: 'pendingReward', type: 'uint256' }, { name: 'rewardDebt', type: 'uint256' }, { name: 'withdrawn', type: 'bool' },
+    ],
+  },
+  {
+    type: 'function', name: 'pendingReward', stateMutability: 'view',
+    inputs: [{ name: 'positionId', type: 'uint256' }], outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function', name: 'getTotalSeizablePrincipal', stateMutability: 'view',
+    inputs: [{ name: 'user', type: 'address' }, { name: 'asset', type: 'address' }], outputs: [{ name: 'total', type: 'uint256' }],
+  },
+  {
+    type: 'function', name: 'stake', stateMutability: 'nonpayable',
+    inputs: [{ name: 'asset', type: 'address' }, { name: 'amount', type: 'uint256' }, { name: 'tier', type: 'uint8' }], outputs: [{ name: 'positionId', type: 'uint256' }],
+  },
+  { type: 'function', name: 'claimReward', stateMutability: 'nonpayable', inputs: [{ name: 'positionId', type: 'uint256' }], outputs: [{ name: 'reward', type: 'uint256' }] },
+  { type: 'function', name: 'withdraw', stateMutability: 'nonpayable', inputs: [{ name: 'positionId', type: 'uint256' }], outputs: [{ name: 'principal', type: 'uint256' }, { name: 'reward', type: 'uint256' }] },
+  { type: 'function', name: 'emergencyWithdraw', stateMutability: 'nonpayable', inputs: [{ name: 'positionId', type: 'uint256' }], outputs: [{ name: 'principal', type: 'uint256' }, { name: 'reward', type: 'uint256' }] },
+] as const;
+
+export const lendingPoolV2Abi = [
+  {
+    type: 'function', name: 'loans', stateMutability: 'view',
+    inputs: [{ name: 'user', type: 'address' }, { name: 'debtAsset', type: 'address' }],
+    outputs: [{ name: 'principal', type: 'uint256' }, { name: 'accruedInterest', type: 'uint256' }, { name: 'lastAccrualTime', type: 'uint256' }, { name: 'active', type: 'bool' }],
+  },
+  {
+    type: 'function', name: 'getCurrentDebt', stateMutability: 'view',
+    inputs: [{ name: 'user', type: 'address' }, { name: 'debtAsset', type: 'address' }],
+    outputs: [{ name: 'principal', type: 'uint256' }, { name: 'storedInterest', type: 'uint256' }, { name: 'pendingInterest', type: 'uint256' }],
+  },
+  { type: 'function', name: 'borrowRatePerSecond', stateMutability: 'view', inputs: [{ name: 'asset', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'maxLtvBps', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'liquidationThresholdBps', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'availableLiquidity', stateMutability: 'view', inputs: [{ name: 'asset', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { type: 'function', name: 'canBorrow', stateMutability: 'view', inputs: [{ name: 'collateralAsset', type: 'address' }, { name: 'debtAsset', type: 'address' }], outputs: [{ name: '', type: 'bool' }] },
+  { type: 'function', name: 'borrow', stateMutability: 'nonpayable', inputs: [{ name: 'collateralAsset', type: 'address' }, { name: 'debtAsset', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [] },
+  { type: 'function', name: 'repay', stateMutability: 'nonpayable', inputs: [{ name: 'debtAsset', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ name: 'amountRepaid', type: 'uint256' }] },
+] as const;
+
+export const oracleAdapterV2Abi = [
+  { type: 'function', name: 'isHealthy', stateMutability: 'view', inputs: [{ name: 'asset', type: 'address' }], outputs: [{ name: '', type: 'bool' }] },
+  { type: 'function', name: 'getValidatedPrice', stateMutability: 'nonpayable', inputs: [{ name: 'asset', type: 'address' }], outputs: [{ name: 'priceWad', type: 'uint256' }, { name: 'updatedAt', type: 'uint256' }] },
 ] as const;

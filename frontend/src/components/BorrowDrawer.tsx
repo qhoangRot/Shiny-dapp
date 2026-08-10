@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { formatUnits, parseUnits } from 'viem';
-import { useAccount, useReadContracts, useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
-import { CONTRACTS, TESTNET_ORACLE, lendingPoolAbi, priceOracleAbi, stakingVaultAbi } from '../config/contracts';
+import { BaseError, formatUnits, parseUnits } from 'viem';
+import { useAccount, usePublicClient, useReadContracts, useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
+import { CONTRACTS, TESTNET_ORACLE, V2_CONTRACTS, lendingPoolV2Abi, oracleAdapterV2Abi, stakingVaultV2Abi } from '../config/contracts';
 import { useRefreshProtocolData } from '../hooks/useRefreshProtocolData';
 import { InfoTip } from './InfoTip';
 import { TokenIcon } from './TokenIcon';
@@ -11,6 +11,30 @@ type Asset = 'USDC' | 'EURC';
 
 const BPS_DENOMINATOR = 10_000;
 const SECONDS_PER_YEAR = 31_536_000;
+
+function parseTokenAmount(value: string) {
+  if (!value || !/^\d*(?:\.\d{0,6})?$/.test(value)) return 0n;
+  try {
+    return parseUnits(value, 6);
+  } catch {
+    return 0n;
+  }
+}
+
+function transactionErrorMessage(error: unknown) {
+  const message = error instanceof BaseError
+    ? error.shortMessage
+    : error instanceof Error
+      ? error.message
+      : 'The transaction could not be prepared.';
+  if (/user rejected|user denied/i.test(message)) return 'Transaction cancelled in your wallet.';
+  if (/Max LTV|Vay vuot qua/i.test(message)) return 'This borrow would exceed Max LTV.';
+  if (/collateral|tai san the chap/i.test(message)) return 'No eligible collateral is available.';
+  if (/balance|transfer amount exceeds/i.test(message)) return 'The lending pool does not have enough liquidity.';
+  if (/paused/i.test(message)) return 'Borrowing is temporarily paused.';
+  if (/oracle|price/i.test(message)) return 'Oracle price needs refresh, try again shortly.';
+  return message;
+}
 
 function hfColor(hf: number) {
   if (!Number.isFinite(hf)) return '#4FD1C5';
@@ -53,28 +77,31 @@ export function BorrowDrawer({
   onTransactionConfirmed,
 }: BorrowDrawerProps) {
   const { address } = useAccount();
+  const publicClient = usePublicClient();
   const refreshProtocolData = useRefreshProtocolData();
   const syncedBorrowHash = useRef<`0x${string}` | undefined>(undefined);
   const [asset, setAsset] = useState<Asset>('USDC');
+  const [collateralAsset, setCollateralAsset] = useState<Asset>('EURC');
   const [amount, setAmount] = useState('');
+  const [transactionError, setTransactionError] = useState<string | null>(null);
 
   const assetAddress = asset === 'USDC' ? CONTRACTS.usdc : CONTRACTS.eurc;
-  const numericAmount = Number(amount);
-  const amountWei = amount && !isNaN(numericAmount) && numericAmount > 0 ? parseUnits(amount, 6) : 0n;
+  const collateralAddress = collateralAsset === 'USDC' ? CONTRACTS.usdc : CONTRACTS.eurc;
+  const amountWei = parseTokenAmount(amount);
 
-  const { data } = useReadContracts({
+  const { data, error: readError } = useReadContracts({
     contracts: address
       ? [
-          { address: CONTRACTS.lendingPool, abi: lendingPoolAbi, functionName: 'collateralBalance', args: [address, CONTRACTS.usdc] },
-          { address: CONTRACTS.lendingPool, abi: lendingPoolAbi, functionName: 'collateralBalance', args: [address, CONTRACTS.eurc] },
-          { address: CONTRACTS.stakingVault, abi: stakingVaultAbi, functionName: 'getTotalStakedByUser', args: [address, CONTRACTS.usdc] },
-          { address: CONTRACTS.stakingVault, abi: stakingVaultAbi, functionName: 'getTotalStakedByUser', args: [address, CONTRACTS.eurc] },
-          { address: CONTRACTS.lendingPool, abi: lendingPoolAbi, functionName: 'loans', args: [address, CONTRACTS.usdc] },
-          { address: CONTRACTS.lendingPool, abi: lendingPoolAbi, functionName: 'loans', args: [address, CONTRACTS.eurc] },
-          { address: CONTRACTS.lendingPool, abi: lendingPoolAbi, functionName: 'maxLtvBps' },
-          { address: CONTRACTS.lendingPool, abi: lendingPoolAbi, functionName: 'liquidationThresholdBps' },
-          { address: CONTRACTS.lendingPool, abi: lendingPoolAbi, functionName: 'borrowRatePerSecond', args: [assetAddress] },
-          { address: CONTRACTS.priceOracle, abi: priceOracleAbi, functionName: 'viewPrice', args: [] },
+          { address: V2_CONTRACTS.stakingVault, abi: stakingVaultV2Abi, functionName: 'getTotalSeizablePrincipal', args: [address, CONTRACTS.usdc] },
+          { address: V2_CONTRACTS.stakingVault, abi: stakingVaultV2Abi, functionName: 'getTotalSeizablePrincipal', args: [address, CONTRACTS.eurc] },
+          { address: V2_CONTRACTS.lendingPool, abi: lendingPoolV2Abi, functionName: 'getCurrentDebt', args: [address, CONTRACTS.usdc] },
+          { address: V2_CONTRACTS.lendingPool, abi: lendingPoolV2Abi, functionName: 'getCurrentDebt', args: [address, CONTRACTS.eurc] },
+          { address: V2_CONTRACTS.lendingPool, abi: lendingPoolV2Abi, functionName: 'maxLtvBps' },
+          { address: V2_CONTRACTS.lendingPool, abi: lendingPoolV2Abi, functionName: 'liquidationThresholdBps' },
+          { address: V2_CONTRACTS.lendingPool, abi: lendingPoolV2Abi, functionName: 'borrowRatePerSecond', args: [assetAddress] },
+          { address: V2_CONTRACTS.lendingPool, abi: lendingPoolV2Abi, functionName: 'canBorrow', args: [collateralAddress, assetAddress] },
+          { address: V2_CONTRACTS.oracleAdapter, abi: oracleAdapterV2Abi, functionName: 'isHealthy', args: [CONTRACTS.usdc] },
+          { address: V2_CONTRACTS.oracleAdapter, abi: oracleAdapterV2Abi, functionName: 'isHealthy', args: [CONTRACTS.eurc] },
         ]
       : [],
     query: { enabled: !!address && open },
@@ -82,6 +109,11 @@ export function BorrowDrawer({
 
   const borrowWrite = useWriteContract();
   const borrowTx = useWaitForTransactionReceipt({ hash: borrowWrite.data });
+  const isBusy = borrowWrite.isPending || borrowTx.isLoading;
+  const visibleError = transactionError
+    ?? (borrowWrite.error ? transactionErrorMessage(borrowWrite.error) : null)
+    ?? (borrowTx.error ? transactionErrorMessage(borrowTx.error) : null)
+    ?? (readError ? transactionErrorMessage(readError) : null);
 
   useEffect(() => {
     const hash = borrowWrite.data;
@@ -102,6 +134,7 @@ export function BorrowDrawer({
   useEffect(() => {
     if (!open) {
       setAmount('');
+      setTransactionError(null);
       borrowWrite.reset();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,7 +149,7 @@ export function BorrowDrawer({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={onClose}
+            onClick={() => { if (!isBusy) onClose(); }}
           />
           <motion.div
             className="drawer-panel"
@@ -137,31 +170,27 @@ export function BorrowDrawer({
       <>
         <div className="drawer-header">
           <h3>Borrow</h3>
-          <button className="drawer-close" onClick={onClose} aria-label="Close borrow drawer">×</button>
+          <button className="drawer-close" onClick={onClose} aria-label="Close borrow drawer" disabled={isBusy}>×</button>
         </div>
         <p className="text-secondary">Loading...</p>
       </>,
     );
   }
 
-  const collateralUsdc = Number(formatUnits((data[0]?.result as bigint) ?? 0n, 6));
-  const collateralEurc = Number(formatUnits((data[1]?.result as bigint) ?? 0n, 6));
-  const stakedUsdc = Number(formatUnits((data[2]?.result as bigint) ?? 0n, 6));
-  const stakedEurc = Number(formatUnits((data[3]?.result as bigint) ?? 0n, 6));
-  const usdcLoan = data[4]?.result as [bigint, bigint, bigint, boolean] | undefined;
-  const eurcLoan = data[5]?.result as [bigint, bigint, bigint, boolean] | undefined;
-  const maxLtvBps = Number((data[6]?.result as bigint) ?? 7_500n);
-  const liquidationThresholdBps = Number((data[7]?.result as bigint) ?? 8_330n);
-  const ratePerSecond = (data[8]?.result as bigint) ?? 0n;
-  const oraclePrice = data[9]?.result as [bigint, bigint] | undefined;
-  const eurcUsdPrice = oraclePrice && oraclePrice[0] > 0n
-    ? Number(formatUnits(oraclePrice[0], 18))
-    : 0;
-  const oracleAvailable = eurcUsdPrice > 0;
+  const stakedUsdc = Number(formatUnits((data[0]?.result as bigint) ?? 0n, 6));
+  const stakedEurc = Number(formatUnits((data[1]?.result as bigint) ?? 0n, 6));
+  const usdcLoan = data[2]?.result as [bigint, bigint, bigint] | undefined;
+  const eurcLoan = data[3]?.result as [bigint, bigint, bigint] | undefined;
+  const maxLtvBps = Number((data[4]?.result as bigint) ?? 7_500n);
+  const liquidationThresholdBps = Number((data[5]?.result as bigint) ?? 8_330n);
+  const ratePerSecond = (data[6]?.result as bigint) ?? 0n;
+  const borrowPairEnabled = data[7]?.result === true;
+  const oracleAvailable = data[8]?.result === true && data[9]?.result === true;
+  const eurcUsdPrice = TESTNET_ORACLE.initialPrice;
 
-  const totalCollateralUsd = collateralUsdc + stakedUsdc + (collateralEurc + stakedEurc) * eurcUsdPrice;
-  const usdcDebt = usdcLoan ? Number(formatUnits(usdcLoan[0] + usdcLoan[2], 6)) : 0;
-  const eurcDebt = eurcLoan ? Number(formatUnits(eurcLoan[0] + eurcLoan[2], 6)) : 0;
+  const totalCollateralUsd = stakedUsdc + stakedEurc * eurcUsdPrice;
+  const usdcDebt = usdcLoan ? Number(formatUnits(usdcLoan[0] + usdcLoan[1] + usdcLoan[2], 6)) : 0;
+  const eurcDebt = eurcLoan ? Number(formatUnits(eurcLoan[0] + eurcLoan[1] + eurcLoan[2], 6)) : 0;
   const totalDebtUsd = usdcDebt + eurcDebt * eurcUsdPrice;
 
   const borrowAmount = amountWei > 0n ? Number(formatUnits(amountWei, 6)) : 0;
@@ -191,12 +220,14 @@ export function BorrowDrawer({
   const noCollateral = totalCollateralUsd === 0;
   const exceedsMaxLtv = borrowAmountUsd > 0 && projectedLtvBps > maxLtvBps;
   const lowHealthFactor = borrowAmountUsd > 0 && hfAfter < 1.2;
-  const isValidAmount =
-    oracleAvailable && amountWei > 0n && !noCollateral && !exceedsMaxLtv && !lowHealthFactor;
+  const isValidAmount = oracleAvailable && borrowPairEnabled && collateralAsset !== asset
+    && amountWei > 0n && !noCollateral && !exceedsMaxLtv && !lowHealthFactor;
   const success = borrowTx.isSuccess;
 
   const helperText = !oracleAvailable
     ? `${TESTNET_ORACLE.pair} testnet price is unavailable. Borrowing is disabled.`
+    : !borrowPairEnabled || collateralAsset === asset
+      ? 'Choose the opposite staked asset as collateral.'
     : noCollateral
       ? 'Stake or deposit collateral before borrowing.'
     : exceedsMaxLtv
@@ -207,20 +238,28 @@ export function BorrowDrawer({
           ? 'Enter an amount to preview your loan.'
           : 'Review the risk preview before confirming in your wallet.';
 
-  const handleBorrow = () => {
-    borrowWrite.writeContract({
-      address: CONTRACTS.lendingPool,
-      abi: lendingPoolAbi,
-      functionName: 'borrow',
-      args: [assetAddress, amountWei],
-    });
+  const handleBorrow = async () => {
+    if (!isValidAmount || !address || !publicClient || isBusy) return;
+    setTransactionError(null);
+    try {
+      const { request } = await publicClient.simulateContract({
+        account: address,
+        address: V2_CONTRACTS.lendingPool,
+        abi: lendingPoolV2Abi,
+        functionName: 'borrow',
+        args: [collateralAddress, assetAddress, amountWei],
+      });
+      await borrowWrite.writeContractAsync(request);
+    } catch (error) {
+      setTransactionError(transactionErrorMessage(error));
+    }
   };
 
   return renderShell(
     <>
       <div className="drawer-header">
         <h3>Borrow</h3>
-        <button className="drawer-close" onClick={onClose} aria-label="Close borrow drawer">×</button>
+        <button className="drawer-close" onClick={onClose} aria-label="Close borrow drawer" disabled={isBusy}>×</button>
       </div>
 
       {success ? (
@@ -237,13 +276,43 @@ export function BorrowDrawer({
       ) : (
         <>
           <div className="drawer-field">
+            <label>Collateral Asset</label>
+            <div className="asset-toggle">
+              {(['USDC', 'EURC'] as Asset[]).map((item) => (
+                <button
+                  key={item}
+                  className={`asset-toggle__btn ${collateralAsset === item ? 'asset-toggle__btn--active' : ''}`}
+                  onClick={() => {
+                    setCollateralAsset(item);
+                    if (item === asset) setAsset(item === 'USDC' ? 'EURC' : 'USDC');
+                    setAmount('');
+                    setTransactionError(null);
+                    borrowWrite.reset();
+                  }}
+                  disabled={isBusy}
+                >
+                  <TokenIcon symbol={item} size={20} />
+                  {item}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="drawer-field">
             <label>Asset to Borrow</label>
             <div className="asset-toggle">
               {(['USDC', 'EURC'] as Asset[]).map((item) => (
                 <button
                   key={item}
                   className={`asset-toggle__btn ${asset === item ? 'asset-toggle__btn--active' : ''}`}
-                  onClick={() => setAsset(item)}
+                  onClick={() => {
+                    setAsset(item);
+                    if (item === collateralAsset) setCollateralAsset(item === 'USDC' ? 'EURC' : 'USDC');
+                    setAmount('');
+                    setTransactionError(null);
+                    borrowWrite.reset();
+                  }}
+                  disabled={isBusy}
                 >
                   <TokenIcon symbol={item} size={20} />
                   {item}
@@ -256,21 +325,27 @@ export function BorrowDrawer({
             <label>Borrow Amount</label>
             <div className="drawer-amount-input">
               <input
-                type="number"
-                min="0"
-                step="any"
+                inputMode="decimal"
                 placeholder="0.00"
                 value={amount}
                 onChange={(event) => {
                   const value = event.target.value;
-                  if (value === '' || Number(value) >= 0) {
+                  if (value === '' || /^\d*(?:\.\d{0,6})?$/.test(value)) {
                     setAmount(value);
+                    setTransactionError(null);
+                    borrowWrite.reset();
                   }
                 }}
+                disabled={isBusy}
               />
               <button
                 className="drawer-max-btn"
-                onClick={() => setAmount(maxBorrowInAsset > 0 ? maxBorrowInAsset.toFixed(6) : '')}
+                onClick={() => {
+                  setAmount(maxBorrowInAsset > 0 ? maxBorrowInAsset.toFixed(6) : '');
+                  setTransactionError(null);
+                  borrowWrite.reset();
+                }}
+                disabled={isBusy}
               >
                 MAX
               </button>
@@ -350,11 +425,18 @@ export function BorrowDrawer({
             <span>{helperText}</span>
           </p>
 
+          {visibleError && (
+            <div className="stake-read-error" role="alert">
+              <span>{visibleError}</span>
+              <button type="button" onClick={() => setTransactionError(null)}>Dismiss</button>
+            </div>
+          )}
+
           <div className="drawer-actions">
             <button
               className="cta-button"
               disabled={!isValidAmount || borrowWrite.isPending || borrowTx.isLoading}
-              onClick={handleBorrow}
+              onClick={() => void handleBorrow()}
             >
               {borrowWrite.isPending ? 'Confirm in wallet...' : borrowTx.isLoading ? 'Borrowing...' : 'Borrow'}
             </button>

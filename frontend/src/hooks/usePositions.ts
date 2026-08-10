@@ -44,7 +44,7 @@ export function usePositions() {
     query: {
       enabled: Boolean(address),
       staleTime: 15_000,
-      refetchInterval: 30_000,
+      refetchInterval: 10_000,
     },
   });
 
@@ -73,7 +73,7 @@ export function usePositions() {
     query: {
       enabled: Boolean(address) && positionIds.length > 0,
       staleTime: 15_000,
-      refetchInterval: 30_000,
+      refetchInterval: 10_000,
     },
   });
 

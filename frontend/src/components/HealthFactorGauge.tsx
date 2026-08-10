@@ -11,13 +11,40 @@ function gaugePosition(hf: number) {
   );
 }
 
-export function HealthFactorGauge({ hf, hasLoans }: { hf: number; hasLoans: boolean }) {
+export function HealthFactorGauge({
+  hf,
+  hasLoans,
+  label = 'Health Factor',
+  unavailable = false,
+}: {
+  hf: number;
+  hasLoans: boolean;
+  label?: string;
+  unavailable?: boolean;
+}) {
+  if (hasLoans && unavailable) {
+    return (
+      <section className="hf-gauge hf-gauge--unavailable glass-panel" aria-label={`${label} unavailable`}>
+        <div className="hf-gauge__top">
+          <span className="hf-gauge__label">
+            {label}
+            <InfoTip text="Health Factor cannot be calculated until the V2 oracle price is refreshed." />
+          </span>
+          <span className="hf-gauge__status hf-gauge__status--neutral">Price refresh needed</span>
+        </div>
+        <div className="hf-gauge__value">—</div>
+        <div className="hf-gauge__track hf-gauge__track--idle" aria-hidden="true" />
+        <p className="hf-gauge__hint">Risk data will return after the V2 oracle receives a fresh price.</p>
+      </section>
+    );
+  }
+
   if (!hasLoans) {
     return (
       <section className="hf-gauge hf-gauge--empty glass-panel" aria-label="Health Factor">
         <div className="hf-gauge__top">
           <span className="hf-gauge__label">
-            Health Factor
+            {label}
             <InfoTip text="Health Factor measures the safety of your borrow position. A value at or below 1.00 can be liquidated." />
           </span>
           <span className="hf-gauge__status hf-gauge__status--neutral">No active loans</span>
@@ -44,7 +71,7 @@ export function HealthFactorGauge({ hf, hasLoans }: { hf: number; hasLoans: bool
     >
       <div className="hf-gauge__top">
         <span className="hf-gauge__label">
-          Health Factor
+          {label}
           <InfoTip text="Health Factor measures the safety of your borrow position. A value at or below 1.00 can be liquidated." />
         </span>
         <span className={`hf-gauge__status hf-gauge__status--${statusClass}`}>{status}</span>

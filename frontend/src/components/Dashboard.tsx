@@ -6,30 +6,36 @@ import {
   useWriteContract,
   useWaitForTransactionReceipt,
 } from 'wagmi';
-import { formatUnits } from 'viem';
+import { BaseError, encodeFunctionData, formatUnits } from 'viem';
 import {
   CONTRACTS,
   REWARD_DISTRIBUTOR_ADDRESS,
   TESTNET_ORACLE,
+  V2_CONTRACTS,
   lendingPoolAbi,
   priceOracleAbi,
   rewardDistributorAbi,
   stakingVaultAbi,
+  stakingVaultV2Abi,
 } from '../config/contracts';
 import { CountUp } from './CountUp';
 import { TokenIcon } from './TokenIcon';
 import { HealthFactorGauge } from './HealthFactorGauge';
 import { InfoTip } from './InfoTip';
 import { usePositions, type StakePosition } from '../hooks/usePositions';
+import { useV2Positions, type V2StakePosition } from '../hooks/useV2Positions';
+import { useV2PositionRewards, type V2PositionRewardState } from '../hooks/useV2PositionRewards';
+import { useV2Loans } from '../hooks/useV2Loans';
 import {
   usePositionRewards,
   type PositionRewardState,
 } from '../hooks/usePositionRewards';
 import { useRefreshProtocolData } from '../hooks/useRefreshProtocolData';
-import { formatRewardDisplay } from '../lib/rewards';
+import { formatRewardDisplay, MIN_CLAIMABLE_REWARD } from '../lib/rewards';
 import { StakeDrawer } from './StakeDrawer';
 import { BorrowDrawer } from './BorrowDrawer';
 import { RepayDrawer } from './RepayDrawer';
+import { V2RepayDrawer } from './V2RepayDrawer';
 
 const MAX_HF_THRESHOLD = 1_000_000;
 const TIER_LABELS = ['Flexible', 'Growth', 'Diamond'];
@@ -50,52 +56,117 @@ function PositionActionButton({
   onDone,
 }: {
   positionId: bigint;
-  action: 'claimReward' | 'withdraw';
+  action: 'claimReward' | 'withdraw' | 'emergencyWithdraw';
   label: string;
   disabled?: boolean;
   disabledReason?: string;
   onWithdrawBlocked?: () => void | Promise<void>;
   onDone: () => void | Promise<void>;
 }) {
+  const { address } = useAccount();
   const publicClient = usePublicClient();
   const {
-    writeContract,
+    writeContractAsync,
     data: hash,
     isPending,
     error: writeError,
     reset,
   } = useWriteContract();
+  const [fallbackHash, setFallbackHash] = useState<`0x${string}` | undefined>();
+  const activeHash = hash ?? fallbackHash;
   const {
     isLoading: isConfirming,
     isSuccess,
     error: receiptError,
-  } = useWaitForTransactionReceipt({ hash });
+  } = useWaitForTransactionReceipt({ hash: activeHash });
   const syncedHash = useRef<`0x${string}` | undefined>(undefined);
   const resetTimerRef = useRef<number | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isCheckingRewards, setIsCheckingRewards] = useState(false);
   const [preflightMessage, setPreflightMessage] = useState<string | null>(null);
-  const error = writeError ?? receiptError;
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [confirmDustForfeit, setConfirmDustForfeit] = useState(false);
+  const [confirmEmergencyWithdraw, setConfirmEmergencyWithdraw] = useState(false);
+  // `writeError` remains populated after the injected-provider fallback has
+  // submitted successfully, so do not let that connector-only error mask the
+  // receipt state of the real transaction.
+  const isConnectorFallbackError = Boolean(
+    fallbackHash && writeError?.message.includes('connector.getChainId is not a function'),
+  );
+  const error = actionError ?? (isConnectorFallbackError ? null : writeError) ?? receiptError;
 
   const handleClick = async () => {
+    // Do not rely on the native disabled attribute alone. Reward data can
+    // refresh between pointer-down and click, so keep the transaction handler
+    // closed whenever the action is not currently allowed.
+    if (disabled || isPending || isConfirming || isSyncing || isCheckingRewards) return;
+
     if (resetTimerRef.current !== null) {
       window.clearTimeout(resetTimerRef.current);
       resetTimerRef.current = null;
     }
     setPreflightMessage(null);
+    setActionError(null);
 
-    if (action === 'claimReward') {
-      if (!REWARD_DISTRIBUTOR_ADDRESS) return;
-      writeContract({
-        address: REWARD_DISTRIBUTOR_ADDRESS,
-        abi: rewardDistributorAbi,
-        functionName: 'claimReward',
-        args: [positionId],
-      });
+    if (action === 'emergencyWithdraw' && !confirmEmergencyWithdraw) {
+      setConfirmEmergencyWithdraw(true);
+      setPreflightMessage('Confirm early exit?');
+      resetTimerRef.current = window.setTimeout(() => {
+        setConfirmEmergencyWithdraw(false);
+        setPreflightMessage(null);
+        resetTimerRef.current = null;
+      }, 5_000);
       return;
     }
 
-    if (REWARD_DISTRIBUTOR_ADDRESS) {
+    if (action === 'claimReward') {
+      if (!REWARD_DISTRIBUTOR_ADDRESS || !address || !publicClient) return;
+      try {
+        const { request } = await publicClient.simulateContract({
+          account: address,
+          address: REWARD_DISTRIBUTOR_ADDRESS,
+          abi: rewardDistributorAbi,
+          functionName: 'claimReward',
+          args: [positionId],
+        });
+        await writeContractAsync(request);
+      } catch (claimError) {
+        // Some injected wallets expose a valid EIP-1193 provider but an
+        // incomplete wagmi connector (missing getChainId). Claiming remains
+        // safe through the provider because the same calldata was simulated
+        // above; this fallback only handles that connector compatibility bug.
+        const message = claimError instanceof Error ? claimError.message : '';
+        const provider = (window as Window & {
+          ethereum?: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
+        }).ethereum;
+
+        if (message.includes('connector.getChainId is not a function') && provider) {
+          try {
+            const data = encodeFunctionData({
+              abi: rewardDistributorAbi,
+              functionName: 'claimReward',
+              args: [positionId],
+            });
+            const transactionHash = await provider.request({
+              method: 'eth_sendTransaction',
+              params: [{ from: address, to: REWARD_DISTRIBUTOR_ADDRESS, data }],
+            });
+            if (typeof transactionHash !== 'string' || !transactionHash.startsWith('0x')) {
+              throw new Error('Wallet did not return a transaction hash.');
+            }
+            setFallbackHash(transactionHash as `0x${string}`);
+            return;
+          } catch (fallbackError) {
+            setActionError(fallbackError instanceof BaseError ? fallbackError.shortMessage : fallbackError instanceof Error ? fallbackError.message : 'Wallet could not submit the claim.');
+            return;
+          }
+        }
+        setActionError(claimError instanceof BaseError ? claimError.shortMessage : claimError instanceof Error ? claimError.message : 'Claim could not be prepared.');
+      }
+      return;
+    }
+
+    if (action === 'withdraw' && REWARD_DISTRIBUTOR_ADDRESS) {
       if (!publicClient) {
         setPreflightMessage('Check failed');
         resetTimerRef.current = window.setTimeout(() => {
@@ -114,13 +185,25 @@ function PositionActionButton({
           args: [positionId],
         });
 
-        if (pendingReward > 0n) {
+        if (pendingReward >= MIN_CLAIMABLE_REWARD) {
           setPreflightMessage('Reward pending');
+          setConfirmDustForfeit(false);
           await onWithdrawBlocked?.();
           resetTimerRef.current = window.setTimeout(() => {
             setPreflightMessage(null);
             resetTimerRef.current = null;
           }, 3_000);
+          return;
+        }
+
+        if (pendingReward > 0n && !confirmDustForfeit) {
+          setConfirmDustForfeit(true);
+          setPreflightMessage('Forfeit dust?');
+          resetTimerRef.current = window.setTimeout(() => {
+            setConfirmDustForfeit(false);
+            setPreflightMessage(null);
+            resetTimerRef.current = null;
+          }, 5_000);
           return;
         }
       } catch {
@@ -136,17 +219,48 @@ function PositionActionButton({
       }
     }
 
-    writeContract({
-      address: CONTRACTS.stakingVault,
-      abi: stakingVaultAbi,
-      functionName: 'withdraw',
-      args: [positionId],
-    });
+    try {
+      if (!publicClient || !address) throw new Error('Wallet client is unavailable.');
+      const { request } = await publicClient.simulateContract({
+        account: address,
+        address: CONTRACTS.stakingVault,
+        abi: stakingVaultAbi,
+        functionName: action,
+        args: [positionId],
+      });
+      await writeContractAsync(request);
+      setConfirmDustForfeit(false);
+      setConfirmEmergencyWithdraw(false);
+    } catch (withdrawError) {
+      const message = withdrawError instanceof Error ? withdrawError.message : '';
+      const provider = (window as Window & {
+        ethereum?: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
+      }).ethereum;
+      if (message.includes('connector.getChainId is not a function') && provider && address) {
+        try {
+          const data = encodeFunctionData({ abi: stakingVaultAbi, functionName: action, args: [positionId] });
+          const transactionHash = await provider.request({
+            method: 'eth_sendTransaction',
+            params: [{ from: address, to: CONTRACTS.stakingVault, data }],
+          });
+          if (typeof transactionHash !== 'string' || !transactionHash.startsWith('0x')) {
+            throw new Error('Wallet did not return a transaction hash.');
+          }
+          setFallbackHash(transactionHash as `0x${string}`);
+          setConfirmEmergencyWithdraw(false);
+          return;
+        } catch (fallbackError) {
+          setActionError(fallbackError instanceof BaseError ? fallbackError.shortMessage : fallbackError instanceof Error ? fallbackError.message : 'Wallet could not submit the withdrawal.');
+          return;
+        }
+      }
+      setActionError(withdrawError instanceof BaseError ? withdrawError.shortMessage : withdrawError instanceof Error ? withdrawError.message : 'Withdrawal could not be prepared.');
+    }
   };
 
   useEffect(() => {
-    if (!isSuccess || !hash || syncedHash.current === hash) return;
-    syncedHash.current = hash;
+    if (!isSuccess || !activeHash || syncedHash.current === activeHash) return;
+    syncedHash.current = activeHash;
     setIsSyncing(true);
 
     void Promise.resolve(onDone())
@@ -155,17 +269,20 @@ function PositionActionButton({
         setIsSyncing(false);
         resetTimerRef.current = window.setTimeout(() => {
           reset();
+          setFallbackHash(undefined);
           syncedHash.current = undefined;
           resetTimerRef.current = null;
         }, 1_200);
       });
-  }, [hash, isSuccess, onDone, reset]);
+  }, [activeHash, isSuccess, onDone, reset]);
 
   useEffect(() => {
     if (!error) return;
 
     resetTimerRef.current = window.setTimeout(() => {
       reset();
+      setFallbackHash(undefined);
+      setActionError(null);
       resetTimerRef.current = null;
     }, 3_000);
   }, [error, reset]);
@@ -192,9 +309,11 @@ function PositionActionButton({
       disabled={disabled || isCheckingRewards || isPending || isConfirming || isSyncing}
       title={
         error
-          ? error.message
+          ? typeof error === 'string' ? error : error.message
           : preflightMessage
-            ? 'Claim the accrued reward before withdrawing this position.'
+            ? preflightMessage === 'Forfeit dust?'
+              ? 'This position has less than 0.01 reward. Click again within 5 seconds to withdraw and forfeit that dust reward.'
+              : 'Claim the accrued reward before withdrawing this position.'
             : disabled
               ? disabledReason
               : undefined
@@ -222,8 +341,15 @@ export function StakePositionRow({
   const amount = Number(formatUnits(position.principal, 6));
   const isLocked = position.unlockTime > 0n && BigInt(Math.floor(Date.now() / 1000)) < position.unlockTime;
   const rewardsInactive = !reward.isActive && reward.amount === 0n;
-  const mustClaimBeforeWithdraw = reward.amount > 0n;
-  const rewardDisplay = formatRewardDisplay(reward.amount, symbol);
+  const canClaimReward = reward.amount >= MIN_CLAIMABLE_REWARD;
+  // Tiny dust remains visible as accruing, but does not hold a Flexible
+  // withdrawal hostage while the primary Claim button is intentionally muted.
+  const mustClaimBeforeWithdraw = canClaimReward;
+  const rewardDisplay = formatRewardDisplay(
+    reward.amount,
+    symbol,
+    reward.annualRateBps > 0n,
+  );
   const unlockDate = position.unlockTime > 0n
     ? new Date(Number(position.unlockTime) * 1000)
     : null;
@@ -247,6 +373,7 @@ export function StakePositionRow({
         </span>
       </td>
       <td>{TIER_LABELS[position.tier] ?? '—'}</td>
+      <td><span className="protocol-badge protocol-badge--legacy">Legacy</span></td>
       <td className="numeric-cell">{amount.toFixed(2)}</td>
       <td className="numeric-cell">
         {rewardsLoading ? (
@@ -282,23 +409,37 @@ export function StakePositionRow({
       </td>
       <td className="position-actions-cell">
         <div className="position-actions">
+          {canClaimReward && REWARD_DISTRIBUTOR_ADDRESS ? (
+            <PositionActionButton
+              positionId={position.id}
+              action="claimReward"
+              label="Claim"
+              onDone={onClaimDone}
+            />
+          ) : (
+            <span
+              className="row-action-btn row-action-btn--disabled"
+              role="button"
+              aria-disabled="true"
+              title={
+                !REWARD_DISTRIBUTOR_ADDRESS
+                  ? 'Rewards are not configured for this deployment.'
+                  : `Rewards become claimable at 0.01 ${symbol}.`
+              }
+            >
+              Claim
+            </span>
+          )}
           <PositionActionButton
             positionId={position.id}
-            action="claimReward"
-            label="Claim"
-            disabled={!REWARD_DISTRIBUTOR_ADDRESS || reward.amount === 0n}
-            onDone={onClaimDone}
-          />
-          <PositionActionButton
-            positionId={position.id}
-            action="withdraw"
-            label="Withdraw"
-            disabled={isLocked || mustClaimBeforeWithdraw}
+            action={isLocked ? 'emergencyWithdraw' : 'withdraw'}
+            label={isLocked ? 'Emergency withdraw' : 'Withdraw'}
+            disabled={!isLocked && mustClaimBeforeWithdraw}
             disabledReason={
-              mustClaimBeforeWithdraw
+              !isLocked && mustClaimBeforeWithdraw
                 ? 'Claim the accrued reward first. Withdraw becomes available after the claim is confirmed.'
                 : isLocked
-                  ? 'This vault position is still locked.'
+                  ? 'Returns principal now. Unclaimed rewards may be forfeited under the early-withdrawal penalty.'
                   : undefined
             }
             onWithdrawBlocked={onClaimDone}
@@ -308,6 +449,54 @@ export function StakePositionRow({
       </td>
     </tr>
   );
+}
+
+export function V2StakePositionRow({ position, reward, onDone }: {
+  position: V2StakePosition;
+  reward: V2PositionRewardState;
+  onDone: () => void | Promise<void>;
+}) {
+  const { address } = useAccount();
+  const publicClient = usePublicClient();
+  const { writeContractAsync, data: hash, isPending } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
+  const symbol = tokenSymbol(position.asset);
+  const isLocked = position.unlockTime > BigInt(Math.floor(Date.now() / 1000));
+  const canClaim = reward.amount >= MIN_CLAIMABLE_REWARD;
+  const [error, setError] = useState<string | null>(null);
+
+  const execute = async (action: 'claimReward' | 'withdraw' | 'emergencyWithdraw') => {
+    if (!address || !publicClient || isPending || isConfirming) return;
+    try {
+      const { request } = await publicClient.simulateContract({
+        account: address,
+        address: V2_CONTRACTS.stakingVault,
+        abi: stakingVaultV2Abi,
+        functionName: action,
+        args: [position.id],
+      });
+      await writeContractAsync(request);
+    } catch (caught) {
+      setError(caught instanceof BaseError ? caught.shortMessage : 'Transaction could not be prepared.');
+    }
+  };
+
+  useEffect(() => {
+    if (isSuccess) void onDone();
+  }, [isSuccess, onDone]);
+
+  return <tr>
+    <td><span className="asset-with-icon"><TokenIcon symbol={symbol} size={22} />{symbol}</span></td>
+    <td>{TIER_LABELS[position.tier] ?? '—'}</td>
+    <td><span className="protocol-badge protocol-badge--v2">V2</span></td>
+    <td className="numeric-cell">{Number(formatUnits(position.principal, 6)).toFixed(2)}</td>
+    <td className="numeric-cell">{formatRewardDisplay(reward.amount, symbol, false).label}</td>
+    <td><span className={`position-lock${isLocked ? ' position-lock--locked' : ''}`}>{isLocked ? 'Locked' : 'Unlocked'}</span></td>
+    <td className="position-actions-cell"><div className="position-actions">
+      <button className="row-action-btn" disabled={!canClaim || isPending || isConfirming} title={!canClaim ? `Rewards become claimable at 0.01 ${symbol}.` : undefined} onClick={() => void execute('claimReward')}>{isPending || isConfirming ? 'Processing…' : 'Claim'}</button>
+      <button className="row-action-btn" disabled={isPending || isConfirming} title={error ?? (isLocked ? 'Early withdrawal returns principal but applies the reward penalty.' : undefined)} onClick={() => void execute(isLocked ? 'emergencyWithdraw' : 'withdraw')}>{isLocked ? 'Early withdraw' : 'Withdraw'}</button>
+    </div></td>
+  </tr>;
 }
 
 export function Dashboard() {
@@ -322,11 +511,22 @@ export function Dashboard() {
     isLoading: rewardsLoading,
     refreshAfterClaim,
   } = usePositionRewards(positions);
-  const refreshProtocolData = useRefreshProtocolData();
-  const refreshRetryRef = useRef<number | null>(null);
   const [stakeDrawerOpen, setStakeDrawerOpen] = useState(false);
   const [borrowDrawerOpen, setBorrowDrawerOpen] = useState(false);
-  const [selectedRepayAsset, setSelectedRepayAsset] = useState<'USDC' | 'EURC' | null>(null);
+  const [selectedRepayAsset, setSelectedRepayAsset] = useState<{ asset: 'USDC' | 'EURC'; deployment: 'v1' | 'v2' } | null>(null);
+  const [optimisticStakedFloor, setOptimisticStakedFloor] = useState<number | null>(null);
+  const {
+    positions: v2Positions,
+    refetch: refetchV2Positions,
+  } = useV2Positions();
+  const {
+    getReward: getV2Reward,
+    refetchRewards: refetchV2Rewards,
+  } = useV2PositionRewards(v2Positions);
+  const v2LoansState = useV2Loans(!stakeDrawerOpen && !borrowDrawerOpen);
+  const refreshProtocolData = useRefreshProtocolData();
+  const refreshRetryRef = useRef<number | null>(null);
+  const readyAddressRef = useRef<`0x${string}` | undefined>(undefined);
 
   const anyDrawerOpen = stakeDrawerOpen || borrowDrawerOpen || selectedRepayAsset !== null;
 
@@ -347,7 +547,9 @@ export function Dashboard() {
           { address: CONTRACTS.stakingVault, abi: stakingVaultAbi, functionName: 'getTotalStakedByUser', args: [address, CONTRACTS.eurc] },
         ]
       : [],
-    query: { enabled: !!address, refetchInterval: anyDrawerOpen ? false : 30_000 },
+    // Keep portfolio totals reasonably fresh while the dashboard is open.
+    // Transaction callbacks still force an immediate refetch.
+    query: { enabled: !!address, refetchInterval: anyDrawerOpen ? false : 10_000 },
   });
 
   const refreshDashboard = useCallback(async () => {
@@ -355,6 +557,9 @@ export function Dashboard() {
       refreshProtocolData(),
       refetchPositions(),
       refetchDashboardReads(),
+      refetchV2Positions(),
+      refetchV2Rewards(),
+      v2LoansState.refetch(),
     ]);
 
     // Arc Testnet RPC nodes can briefly trail the receipt block. Verify once
@@ -367,14 +572,58 @@ export function Dashboard() {
       void Promise.all([
         refetchPositions(),
         refetchDashboardReads(),
-      ]);
-      refreshRetryRef.current = null;
+        refetchV2Positions(),
+        v2LoansState.refetch(),
+      ]).then(() => {
+        // Arc RPC nodes can lag the receipt block by more than one response.
+        // A second short retry avoids requiring a manual page reload without
+        // making the dashboard poll aggressively all the time.
+        refreshRetryRef.current = window.setTimeout(() => {
+          void Promise.all([refetchPositions(), refetchDashboardReads()]);
+          refreshRetryRef.current = null;
+        }, 1_500);
+      });
     }, 700);
   }, [
     refreshProtocolData,
     refetchDashboardReads,
     refetchPositions,
+    refetchV2Positions,
+    refetchV2Rewards,
+    v2LoansState,
   ]);
+
+  // Keep a temporary floor sourced from the confirmed transaction itself.
+  // Arc RPC reads can trail the receipt block briefly, so rendering only the
+  // refetched value makes totals jump backward before they catch up.
+  const liveOraclePrice = data?.[5]?.result as [bigint, bigint] | undefined;
+  const liveEurcUsdPrice = liveOraclePrice && liveOraclePrice[0] > 0n
+    ? Number(formatUnits(liveOraclePrice[0], 18))
+    : 0;
+  const liveStakedUsdc = Number(formatUnits((data?.[6]?.result as bigint) ?? 0n, 6));
+  const liveStakedEurc = Number(formatUnits((data?.[7]?.result as bigint) ?? 0n, 6));
+  const liveTotalStakedUsd = liveStakedUsdc + liveStakedEurc * liveEurcUsdPrice;
+
+  useEffect(() => {
+    if (optimisticStakedFloor === null || !data) return;
+    if (liveTotalStakedUsd + 0.000001 >= optimisticStakedFloor) {
+      setOptimisticStakedFloor(null);
+    }
+  }, [data, liveTotalStakedUsd, optimisticStakedFloor]);
+
+  const handleStakeConfirmed = useCallback((stake: { asset: 'USDC' | 'EURC'; amount: bigint }) => {
+    const tokenAmount = Number(formatUnits(stake.amount, 6));
+    const usdDelta = stake.asset === 'EURC' ? tokenAmount * liveEurcUsdPrice : tokenAmount;
+    setOptimisticStakedFloor((currentFloor) => (
+      Math.max(currentFloor ?? liveTotalStakedUsd, liveTotalStakedUsd) + usdDelta
+    ));
+    return refreshDashboard();
+  }, [liveEurcUsdPrice, liveTotalStakedUsd, refreshDashboard]);
+
+  const handlePortfolioMutation = useCallback(() => {
+    setOptimisticStakedFloor(null);
+    return refreshDashboard();
+  }, [refreshDashboard]);
 
   useEffect(() => () => {
     if (refreshRetryRef.current !== null) {
@@ -384,7 +633,8 @@ export function Dashboard() {
 
   if (!address) return null;
 
-  if (isLoading || !data || positionsLoading) {
+  const hasRenderedPortfolio = readyAddressRef.current === address;
+  if (!data || (!hasRenderedPortfolio && (isLoading || positionsLoading))) {
     return (
       <div className="dashboard">
         <h2>Dashboard</h2>
@@ -392,6 +642,10 @@ export function Dashboard() {
       </div>
     );
   }
+
+  // Once a wallet has a complete snapshot, background reads for a newly
+  // created position must never replace the whole dashboard with a loader.
+  readyAddressRef.current = address;
 
   const collateralUsdc = Number(formatUnits((data[0]?.result as bigint) ?? 0n, 6));
   const collateralEurc = Number(formatUnits((data[1]?.result as bigint) ?? 0n, 6));
@@ -415,15 +669,44 @@ export function Dashboard() {
   const stakedUsdc = Number(formatUnits((data[6]?.result as bigint) ?? 0n, 6));
   const stakedEurc = Number(formatUnits((data[7]?.result as bigint) ?? 0n, 6));
 
-  const totalStakedUsd = stakedUsdc + stakedEurc * eurcUsdPrice;
+  const v2StakedUsdc = Number(formatUnits(
+    v2Positions.filter((position) => tokenSymbol(position.asset) === 'USDC').reduce((total, position) => total + position.principal, 0n),
+    6,
+  ));
+  const v2StakedEurc = Number(formatUnits(
+    v2Positions.filter((position) => tokenSymbol(position.asset) === 'EURC').reduce((total, position) => total + position.principal, 0n),
+    6,
+  ));
+  const v2EurcUsdPrice = TESTNET_ORACLE.initialPrice;
+  const v2TotalStakedUsd = v2StakedUsdc + v2StakedEurc * v2EurcUsdPrice;
+  const v2DebtUsd = v2LoansState.loans.reduce((total, loan) => total + Number(formatUnits(loan.debt, 6)) * (loan.asset === 'EURC' ? v2EurcUsdPrice : 1), 0);
+  const v2CollateralUsd = v2TotalStakedUsd;
+  const v2Hf = v2DebtUsd > 0 && v2LoansState.oracleHealthy
+    ? (v2CollateralUsd * Number(v2LoansState.liquidationThresholdBps)) / (v2DebtUsd * 10_000)
+    : 0;
+  const v2HasLoans = v2DebtUsd > 0;
+
+  const totalStakedUsd = Math.max(
+    stakedUsdc + stakedEurc * eurcUsdPrice + v2TotalStakedUsd,
+    optimisticStakedFloor ?? 0,
+  );
   const totalCollateralUsd = collateralUsdc + collateralEurc * eurcUsdPrice;
-  const totalBorrowedUsd = usdcDebt + eurcDebt * eurcUsdPrice;
+  const totalBorrowedUsd = usdcDebt + eurcDebt * eurcUsdPrice + v2DebtUsd;
   const netWorthUsd = totalStakedUsd + totalCollateralUsd - totalBorrowedUsd;
 
   const borrowRows = [
     { symbol: 'USDC' as const, amount: usdcDebt, interest: usdcLoan ? Number(formatUnits(usdcLoan[2], 6)) : 0 },
     { symbol: 'EURC' as const, amount: eurcDebt, interest: eurcLoan ? Number(formatUnits(eurcLoan[2], 6)) : 0 },
-  ].filter((row) => row.amount > 0);
+  ].filter((row) => row.amount > 0).map((row) => ({ ...row, deployment: 'v1' as const }));
+  const allBorrowRows = [
+    ...borrowRows,
+    ...v2LoansState.loans.map((loan) => ({
+      symbol: loan.asset,
+      amount: Number(formatUnits(loan.debt, 6)),
+      interest: Number(formatUnits(loan.storedInterest + loan.pendingInterest, 6)),
+      deployment: 'v2' as const,
+    })),
+  ];
 
   return (
     <div className="dashboard">
@@ -438,6 +721,14 @@ export function Dashboard() {
         <span>{TESTNET_ORACLE.label} · not a production oracle</span>
       </div>
 
+      {!v2LoansState.oracleHealthy && (
+        <div className="oracle-disclosure oracle-disclosure--error" role="status">
+          <span className="oracle-disclosure__badge">V2 Oracle</span>
+          <strong>Price refresh needed</strong>
+          <span>V2 borrowing and risk previews are temporarily unavailable. Try again shortly.</span>
+        </div>
+      )}
+
       {hasLiquidationRisk && (
         <div className="risk-alert" role="alert">
           <span className="risk-alert__icon">!</span>
@@ -450,7 +741,18 @@ export function Dashboard() {
         </div>
       )}
 
-      <HealthFactorGauge hf={hf} hasLoans={hasLoans} />
+      <div className={hasLoans && v2HasLoans ? 'hf-gauge-stack' : undefined}>
+        {hasLoans ? <HealthFactorGauge label="Legacy Health Factor" hf={hf} hasLoans /> : null}
+        {v2HasLoans ? (
+          <HealthFactorGauge
+            label="V2 Health Factor"
+            hf={v2Hf}
+            hasLoans
+            unavailable={!v2LoansState.oracleHealthy}
+          />
+        ) : null}
+        {!hasLoans && !v2HasLoans ? <HealthFactorGauge hf={0} hasLoans={false} /> : null}
+      </div>
 
       <div className="dashboard-quick-actions">
         <button className="cta-button" onClick={() => setStakeDrawerOpen(true)}>
@@ -476,14 +778,14 @@ export function Dashboard() {
         </div>
         <div className="banner-card glass-panel">
           <span className="banner-card__label">Active Positions</span>
-          <span className="banner-card__value">{positions.length}</span>
+          <span className="banner-card__value">{positions.length + v2Positions.length}</span>
         </div>
       </div>
 
       <div className="positions-grid">
         <div className="positions-panel glass-panel">
           <h3>Your Staking Positions</h3>
-          {positions.length === 0 ? (
+          {positions.length + v2Positions.length === 0 ? (
             <div className="empty-state">
               <span className="empty-state__title">No Stakes Yet</span>
               <span className="empty-state__subtitle">Stake assets from your wallet to open a position</span>
@@ -494,6 +796,7 @@ export function Dashboard() {
                 <colgroup>
                   <col className="positions-col--asset" />
                   <col className="positions-col--vault" />
+                  <col className="positions-col--protocol" />
                   <col className="positions-col--amount" />
                   <col className="positions-col--reward" />
                   <col className="positions-col--lock" />
@@ -503,11 +806,12 @@ export function Dashboard() {
                   <tr>
                     <th>Asset</th>
                     <th>Vault</th>
+                    <th>Protocol</th>
                     <th className="numeric-cell">Amount</th>
                     <th className="numeric-cell">
                       <span className="table-header-label">
                         Reward
-                        <InfoTip text="Claimable rewards come from a separately funded testnet program, are paid in the staked token, and refresh about every 8 seconds." />
+                        <InfoTip text="Claimable rewards come from a separately funded testnet program, are paid in the staked token, and refresh about every 5 seconds." />
                       </span>
                     </th>
                     <th>
@@ -527,7 +831,15 @@ export function Dashboard() {
                       reward={getReward(p.id)}
                       rewardsLoading={rewardsLoading}
                       onClaimDone={refreshAfterClaim}
-                      onDone={refreshDashboard}
+                      onDone={handlePortfolioMutation}
+                    />
+                  ))}
+                  {v2Positions.map((p) => (
+                    <V2StakePositionRow
+                      key={`v2-${p.id}`}
+                      position={p}
+                      reward={getV2Reward(p)}
+                      onDone={handlePortfolioMutation}
                     />
                   ))}
                 </tbody>
@@ -538,7 +850,7 @@ export function Dashboard() {
 
         <div className="positions-panel glass-panel">
           <h3>Your Borrowed Positions</h3>
-          {borrowRows.length === 0 ? (
+          {allBorrowRows.length === 0 ? (
             <div className="empty-state">
               <span className="empty-state__title">Nothing Borrowed Yet</span>
               <span className="empty-state__subtitle">Borrow stablecoins against your active staking positions</span>
@@ -548,6 +860,7 @@ export function Dashboard() {
               <table className="positions-table positions-table--borrows">
                 <colgroup>
                   <col className="positions-col--borrow-asset" />
+                  <col className="positions-col--protocol" />
                   <col className="positions-col--borrow-amount" />
                   <col className="positions-col--borrow-interest" />
                   <col className="positions-col--borrow-status" />
@@ -556,6 +869,7 @@ export function Dashboard() {
                 <thead>
                   <tr>
                     <th>Asset</th>
+                    <th>Protocol</th>
                     <th className="numeric-cell">Debt</th>
                     <th className="numeric-cell">Interest</th>
                     <th>Status</th>
@@ -563,14 +877,15 @@ export function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {borrowRows.map((row) => (
-                    <tr key={row.symbol}>
+                  {allBorrowRows.map((row) => (
+                    <tr key={`${row.deployment}-${row.symbol}`}>
                       <td>
                         <span className="asset-with-icon">
                           <TokenIcon symbol={row.symbol} size={22} />
                           {row.symbol}
                         </span>
                       </td>
+                      <td><span className={`protocol-badge protocol-badge--${row.deployment === 'v1' ? 'legacy' : 'v2'}`}>{row.deployment === 'v1' ? 'Legacy' : 'V2'}</span></td>
                       <td className="numeric-cell">{row.amount.toFixed(2)}</td>
                       <td className="numeric-cell">{row.interest.toFixed(4)}</td>
                       <td><span className="status-pill status-pill--active">Active</span></td>
@@ -579,7 +894,7 @@ export function Dashboard() {
                           className="row-action-btn"
                           type="button"
                           aria-label={`Repay ${row.symbol}`}
-                          onClick={() => setSelectedRepayAsset(row.symbol)}
+                          onClick={() => setSelectedRepayAsset({ asset: row.symbol, deployment: row.deployment })}
                         >
                           Repay
                         </button>
@@ -596,7 +911,7 @@ export function Dashboard() {
       <StakeDrawer
         open={stakeDrawerOpen}
         onClose={() => setStakeDrawerOpen(false)}
-        onTransactionConfirmed={refreshDashboard}
+        onTransactionConfirmed={handleStakeConfirmed}
       />
 
       <BorrowDrawer
@@ -606,8 +921,14 @@ export function Dashboard() {
       />
 
       <RepayDrawer
-        open={selectedRepayAsset !== null}
-        asset={selectedRepayAsset ?? 'USDC'}
+        open={selectedRepayAsset?.deployment === 'v1'}
+        asset={selectedRepayAsset?.asset ?? 'USDC'}
+        onClose={() => setSelectedRepayAsset(null)}
+        onTransactionConfirmed={refreshDashboard}
+      />
+      <V2RepayDrawer
+        open={selectedRepayAsset?.deployment === 'v2'}
+        asset={selectedRepayAsset?.asset ?? 'USDC'}
         onClose={() => setSelectedRepayAsset(null)}
         onTransactionConfirmed={refreshDashboard}
       />

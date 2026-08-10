@@ -1,7 +1,9 @@
 import { formatUnits } from 'viem';
 
 const TOKEN_DECIMALS = 6;
-const SMALL_REWARD_THRESHOLD = 10_000n;
+// 0.01 tokens at 6 decimals. The contract can technically pay smaller dust
+// amounts, but the interface waits until the amount is meaningful to claim.
+export const MIN_CLAIMABLE_REWARD = 10_000n;
 
 export function formatRewardAmount(value: bigint): string {
   if (value === 0n) return '0.0000';
@@ -14,10 +16,14 @@ export function formatRewardAmount(value: bigint): string {
 export function formatRewardDisplay(
   value: bigint,
   symbol: string,
+  isAccruing = false,
 ): { label: string; exactLabel: string } {
   const exactLabel = `${formatUnits(value, TOKEN_DECIMALS)} ${symbol}`;
 
-  if (value > 0n && value < SMALL_REWARD_THRESHOLD) {
+  // Immediately after a stake, integer-based on-chain accrual can still be
+  // zero for a few blocks. Show that the reward program is active instead of
+  // implying that the position earns nothing.
+  if ((value > 0n && value < MIN_CLAIMABLE_REWARD) || (value === 0n && isAccruing)) {
     return {
       label: `< 0.01 ${symbol} · accruing`,
       exactLabel: `Exact accrued reward: ${exactLabel}`,
