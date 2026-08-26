@@ -38,5 +38,5 @@ export function useV2Loans(enabled = true) {
   }).filter((loan) => loan.active || loan.debt > 0n), [read.data]);
   const oracleHealthy = (read.data?.[4]?.result === true) && (read.data?.[5]?.result === true);
   const liquidationThresholdBps = (read.data?.[6]?.result as bigint | undefined) ?? 8_330n;
-  return { loans, oracleHealthy, liquidationThresholdBps, isLoading: read.isLoading, isError: read.isError, refetch: read.refetch };
+  return { loans, oracleHealthy, liquidationThresholdBps, isLoading: read.isLoading && read.data === undefined, isError: read.isError, refetch: read.refetch };
 }

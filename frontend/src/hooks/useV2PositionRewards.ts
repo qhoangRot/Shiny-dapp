@@ -20,5 +20,7 @@ export function useV2PositionRewards(positions: V2StakePosition[]) {
     return [position.key, { amount, annualRateBps: 0n, isActive: amount > 0n } satisfies V2PositionRewardState];
   })), [positions, read.data]);
   const getReward = useCallback((position: V2StakePosition) => rewards.get(position.key) ?? { amount: 0n, annualRateBps: 0n, isActive: false }, [rewards]);
-  return { getReward, isLoading: positions.length > 0 && read.isLoading, isError: read.isError, refetchRewards: read.refetch };
+  // Do not replace existing position rows with a loading state while rewards
+  // refresh in the background after a transaction.
+  return { getReward, isLoading: positions.length > 0 && read.isLoading && read.data === undefined, isError: read.isError, refetchRewards: read.refetch };
 }

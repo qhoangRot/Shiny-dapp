@@ -6,9 +6,6 @@ import { InfoTip } from './InfoTip';
 import { TokenIcon } from './TokenIcon';
 
 const SECONDS_PER_YEAR = 31_536_000;
-const RATE_SCALE = 10n ** 18n;
-const FULL_REPAY_BALANCE_BUFFER_SECONDS = 600n;
-const MIN_FULL_REPAY_BALANCE_BUFFER = 10_000n; // 0.01 token.
 
 interface RepayDrawerProps {
   open: boolean;
@@ -95,7 +92,6 @@ export function RepayDrawer({
     open,
     asset,
     amount: amountWei,
-    fullRepay,
     onTransactionConfirmed,
   });
 
@@ -177,22 +173,9 @@ export function RepayDrawer({
   const amountTooHigh = !!snapshot
     && !fullRepay
     && amountWei > snapshot.currentDebt;
-  const projectedConfirmationInterest = snapshot
-    ? (snapshot.principal
-      * snapshot.ratePerSecond
-      * FULL_REPAY_BALANCE_BUFFER_SECONDS) / RATE_SCALE
-    : 0n;
-  const fullRepayBalanceBuffer = projectedConfirmationInterest > MIN_FULL_REPAY_BALANCE_BUFFER
-    ? projectedConfirmationInterest
-    : MIN_FULL_REPAY_BALANCE_BUFFER;
-  const fullRepayRequiredBalance = snapshot
-    ? snapshot.currentDebt + fullRepayBalanceBuffer
-    : 0n;
-  const requiredBalance = snapshot
-    ? fullRepay
-      ? fullRepayRequiredBalance
-      : amountWei
-    : 0n;
+  // Approvals and repayments always use the amount selected by the user.
+  // MAX fills the currently displayed debt; it never grants unlimited access.
+  const requiredBalance = snapshot ? amountWei : 0n;
   const insufficientBalance = !!snapshot
     && requiredBalance > 0n
     && snapshot.balance < requiredBalance;
@@ -233,9 +216,7 @@ export function RepayDrawer({
     : insufficientBalance
       ? {
           danger: true,
-          text: fullRepay
-            ? `Keep at least ${formatToken(fullRepayRequiredBalance, 6)} ${asset} in your wallet to cover the debt and interest accrued while you confirm. You can still make a partial repayment.`
-            : `Your wallet does not have enough ${asset} for this repayment.`,
+          text: `Your wallet does not have enough ${asset} for this repayment.`,
         }
       : amountTooHigh
         ? { danger: true, text: 'Repay amount cannot exceed the current debt. Use MAX to close it in full.' }
@@ -244,7 +225,7 @@ export function RepayDrawer({
           : fullRepay
             ? {
                 danger: false,
-                text: 'Full repayment selected. The final amount automatically includes interest accrued while you confirm.',
+                text: 'Full repayment selected. Approval is limited to the current displayed debt amount.',
               }
             : needsApproval
               ? { danger: false, text: `Approve the Lending Pool to use this ${asset} amount, then confirm Repay.` }

@@ -2,7 +2,6 @@ import { useLayoutEffect, useState } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { motion } from 'framer-motion';
 import { CONTRACTS } from '../config/contracts';
-import { useRewardRates } from '../hooks/useRewardRates';
 import { AsciiCoinField } from './AsciiCoinField';
 import { FooterAsciiField } from './FooterAsciiField';
 import { TextScramble } from './TextScramble';
@@ -43,9 +42,11 @@ const FAQ_ITEMS = [
 
 export function LandingLaunchButton({
   onLaunch,
+  onConnectIntent,
   compact = false,
 }: {
   onLaunch: () => void;
+  onConnectIntent?: () => void;
   compact?: boolean;
 }) {
   return (
@@ -63,7 +64,10 @@ export function LandingLaunchButton({
             type="button"
             className={`shiny-action ${compact ? 'shiny-action--compact' : ''}`}
             onClick={() => {
-              if (!connected) openConnectModal();
+              if (!connected) {
+                onConnectIntent?.();
+                openConnectModal();
+              }
               else if (chain.unsupported) openChainModal();
               else onLaunch();
             }}
@@ -78,11 +82,6 @@ export function LandingLaunchButton({
 }
 
 function MarketShowcase() {
-  const {
-    getAnnualRateBps,
-    isConfigured,
-    isLoading,
-  } = useRewardRates();
   const markets = [
     { symbol: 'USDC', name: 'US Dollar Coin', logo: usdcLogo, asset: CONTRACTS.usdc },
     { symbol: 'EURC', name: 'Euro Coin', logo: eurcLogo, asset: CONTRACTS.eurc },
@@ -111,23 +110,15 @@ function MarketShowcase() {
             </div>
           </div>
           <div className="shiny-market-card__rates">
-            {['FLEXIBLE', 'GROWTH / 6M', 'DIAMOND / 12M'].map((tier, tierIndex) => (
+            {['FLEXIBLE', 'GROWTH / 6M', 'DIAMOND / 12M'].map((tier) => (
               <div key={tier}>
                 <span>{tier}</span>
-                {isLoading ? (
-                  <i className="shiny-skeleton" aria-label="Loading reward APR" />
-                ) : !isConfigured || getAnnualRateBps(market.asset, tierIndex) === 0n ? (
-                  <strong>—</strong>
-                ) : (
-                  <strong>
-                    {(Number(getAnnualRateBps(market.asset, tierIndex)) / 100).toFixed(2)}%
-                  </strong>
-                )}
+                <strong>Revenue-based</strong>
               </div>
             ))}
           </div>
           <p className="shiny-market-card__footnote">
-            REWARD APR · UPDATES FROM THE REWARD DISTRIBUTOR
+            REWARDS · FUNDED BY SETTLED BORROW INTEREST
           </p>
         </motion.article>
       ))}
@@ -202,7 +193,15 @@ function FaqSection() {
   );
 }
 
-function LandingFooter({ onLaunch }: { onLaunch: () => void }) {
+function LandingFooter({
+  onLaunch,
+  onConnectIntent,
+  onOpenDocs,
+}: {
+  onLaunch: () => void;
+  onConnectIntent: () => void;
+  onOpenDocs: () => void;
+}) {
   return (
     <div className="shiny-footer-reveal">
       <section className="shiny-cta shiny-theme-light" data-header-theme="light">
@@ -234,7 +233,7 @@ function LandingFooter({ onLaunch }: { onLaunch: () => void }) {
         </div>
         <div className="shiny-cta__action">
           <p>STAKE · EARN · BORROW</p>
-          <LandingLaunchButton onLaunch={onLaunch} />
+          <LandingLaunchButton onLaunch={onLaunch} onConnectIntent={onConnectIntent} />
           <span>ARC TESTNET · USDC + EURC</span>
         </div>
       </section>
@@ -243,6 +242,10 @@ function LandingFooter({ onLaunch }: { onLaunch: () => void }) {
           <div>
             <strong>SHINY</strong>
             <p>PRODUCTIVE STABLECOIN CAPITAL</p>
+            <button className="shiny-footer__documentary" type="button" onClick={onOpenDocs}>
+              <span>OPEN DOCUMENTARY</span>
+              <span aria-hidden="true">↗</span>
+            </button>
           </div>
           <div className="shiny-footer__navigation">
             <nav className="shiny-footer__docs" aria-label="Documentation links">
@@ -253,7 +256,7 @@ function LandingFooter({ onLaunch }: { onLaunch: () => void }) {
                 target="_blank"
                 rel="noreferrer"
               >
-                SHINY DOCS ↗
+                GITHUB ↗
               </a>
             </nav>
             <div className="shiny-footer__socials" aria-label="Community links">
@@ -305,10 +308,14 @@ function LandingFooter({ onLaunch }: { onLaunch: () => void }) {
 
 export function LandingPage({
   onLaunch,
+  onConnectIntent,
+  onOpenDocs,
   onHeaderThemeChange,
   onHeaderExitProgressChange,
 }: {
   onLaunch: () => void;
+  onConnectIntent: () => void;
+  onOpenDocs: () => void;
   onHeaderThemeChange: (theme: 'dark' | 'light') => void;
   onHeaderExitProgressChange: (progress: number) => void;
 }) {
@@ -378,7 +385,7 @@ export function LandingPage({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.28 }}
           >
-            <LandingLaunchButton onLaunch={onLaunch} />
+            <LandingLaunchButton onLaunch={onLaunch} onConnectIntent={onConnectIntent} />
           </motion.div>
         </div>
         <div className="shiny-hero__visual">
@@ -396,7 +403,11 @@ export function LandingPage({
 
       <PrinciplesGrid />
       <FaqSection />
-      <LandingFooter onLaunch={onLaunch} />
+      <LandingFooter
+        onLaunch={onLaunch}
+        onConnectIntent={onConnectIntent}
+        onOpenDocs={onOpenDocs}
+      />
     </div>
   );
 }

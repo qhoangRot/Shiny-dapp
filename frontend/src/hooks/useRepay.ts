@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BaseError, encodeFunctionData, maxUint256 } from 'viem';
+import { BaseError, encodeFunctionData } from 'viem';
 import {
   useAccount,
   useChainId,
@@ -44,7 +44,6 @@ interface UseRepayOptions {
   open: boolean;
   asset: RepayAsset;
   amount: bigint;
-  fullRepay: boolean;
   onTransactionConfirmed?: () => void | Promise<void>;
 }
 
@@ -108,7 +107,6 @@ export function useRepay({
   open,
   asset,
   amount,
-  fullRepay,
   onTransactionConfirmed,
 }: UseRepayOptions) {
   const { address } = useAccount();
@@ -331,11 +329,11 @@ export function useRepay({
     };
   }, [data, nowSeconds]);
 
-  // The contract caps maxUint256 to the exact amount owed. Using the same
-  // sentinel for approval makes a full repayment atomic: it either closes the
-  // selected loan completely or reverts instead of silently leaving dust.
-  const approvalAmount = fullRepay ? maxUint256 : amount;
-  const transactionAmount = fullRepay ? maxUint256 : amount;
+  // Never grant a standing/unlimited allowance. MAX simply fills the current
+  // debt into `amount`, so approval and repayment remain bounded to the exact
+  // user-selected token amount.
+  const approvalAmount = amount;
+  const transactionAmount = amount;
   const effectiveAllowance = snapshot
     ? verifiedAllowance !== null && verifiedAllowance > snapshot.allowance
       ? verifiedAllowance

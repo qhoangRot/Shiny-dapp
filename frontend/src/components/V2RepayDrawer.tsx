@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BaseError, formatUnits, maxUint256, parseUnits } from 'viem';
+import { BaseError, formatUnits, parseUnits } from 'viem';
 import { useAccount, usePublicClient, useReadContracts, useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
 import { CONTRACTS, erc20Abi, lendingPoolV2Abi, oracleAdapterV2Abi, TESTNET_ORACLE, V2_CONTRACTS } from '../config/contracts';
 import { InfoTip } from './InfoTip';
@@ -79,8 +79,10 @@ export function V2RepayDrawer({ open, asset, onClose, onTransactionConfirmed }: 
   const liquidationThresholdBps = data?.[9]?.result as bigint | undefined ?? 8_330n;
   const oracleHealthy = data?.[10]?.result === true && data?.[11]?.result === true;
   const requested = useMemo(() => { try { return amount ? parseUnits(amount, 6) : 0n; } catch { return 0n; } }, [amount]);
-  const repayAmount = fullRepayment ? maxUint256 : requested;
-  const displayRepayAmount = fullRepayment ? debt : requested;
+  // The amount approved and the amount submitted always match. We deliberately
+  // avoid unlimited approvals, including when the user chooses MAX.
+  const repayAmount = requested;
+  const displayRepayAmount = requested;
   const hasRepayAmount = displayRepayAmount > 0n;
   const accruedInterest = (debtParts?.[1] ?? 0n) + (debtParts?.[2] ?? 0n);
   const usdcDebt = (usdcDebtParts?.[0] ?? 0n) + (usdcDebtParts?.[1] ?? 0n) + (usdcDebtParts?.[2] ?? 0n);
@@ -121,13 +123,9 @@ export function V2RepayDrawer({ open, asset, onClose, onTransactionConfirmed }: 
     setError(null);
     try {
       if (balance < displayRepayAmount) throw new Error(`Insufficient ${asset} balance to repay this amount.`);
-      // For a full repayment the call uses maxUint256 so LendingPoolV2 caps at
-      // current debt even if interest accrues between the UI read and mining.
-      // Approval is deliberately maxUint256 too; compare it separately rather
-      // than against the max repay sentinel on every retry.
-      const requiredAllowance = fullRepayment ? maxUint256 : requested;
+      const requiredAllowance = displayRepayAmount;
       if (allowance < requiredAllowance) {
-        const approval = await publicClient.simulateContract({ account: address, address: assetAddress, abi: erc20Abi, functionName: 'approve', args: [V2_CONTRACTS.lendingPool, maxUint256] });
+        const approval = await publicClient.simulateContract({ account: address, address: assetAddress, abi: erc20Abi, functionName: 'approve', args: [V2_CONTRACTS.lendingPool, requiredAllowance] });
         await approveWrite.writeContractAsync(approval.request);
         return;
       }
@@ -149,7 +147,7 @@ export function V2RepayDrawer({ open, asset, onClose, onTransactionConfirmed }: 
         : repayReceipt.isLoading ? 'Repaying…'
           : debt === 0n ? 'No active debt to repay'
             : !hasRepayAmount ? 'Enter an amount to repay'
-              : allowance < (fullRepayment ? maxUint256 : requested) ? `Approve ${asset}` : `Repay ${asset}`;
+              : allowance < displayRepayAmount ? `Approve ${asset}` : `Repay ${asset}`;
   return <AnimatePresence>
     {open && <>
       <motion.div className="drawer-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
@@ -213,8 +211,8 @@ export function V2RepayDrawer({ open, asset, onClose, onTransactionConfirmed }: 
             <span className="hf-preview__values">{formatToken(debt, 6)} {asset}<i aria-hidden="true">→</i><span>{formatToken(debt - (displayRepayAmount > debt ? debt : displayRepayAmount), 6)} {asset}</span></span>
           </div>
         </div>
-        {!oracleHealthy && <p className="borrow-helper"><span className="borrow-helper__icon" aria-hidden="true">i</span><span>Health Factor preview is unavailable until the V2 oracle price is refreshed. Repayment itself remains available.</span></p>}
-        {fullRepayment && <p className="borrow-helper">Full repayment uses a protected allowance and caps the final amount at your live debt.</p>}
+        {!oracleHealthy && <p className="borrow-helper"><span className="borrow-helper__icon" aria-hidden="true">i</span><span>Health Factor preview is unavailable until the oracle price is refreshed. Repayment itself remains available.</span></p>}
+        {fullRepayment && <p className="borrow-helper">Full repayment selected. Approval is limited to the current debt amount.</p>}
         {error && <p className="form-error">{error}</p>}
         <div className="drawer-actions repay-drawer__actions"><button className="cta-button" disabled={busy || debt === 0n || !hasRepayAmount} onClick={() => void submit()}>{buttonText}</button></div>
       </motion.div>

@@ -28,6 +28,9 @@ function transactionErrorMessage(error: unknown) {
       ? error.message
       : 'The transaction could not be prepared.';
   if (/user rejected|user denied/i.test(message)) return 'Transaction cancelled in your wallet.';
+  // LendingPoolV2.InsufficientCollateral(). Keep this readable even when an
+  // RPC returns only the custom-error selector instead of decoded revert data.
+  if (/0x3a23d825/i.test(message)) return 'The selected collateral asset has no eligible staked balance.';
   if (/Max LTV|Vay vuot qua/i.test(message)) return 'This borrow would exceed Max LTV.';
   if (/collateral|tai san the chap/i.test(message)) return 'No eligible collateral is available.';
   if (/balance|transfer amount exceeds/i.test(message)) return 'The lending pool does not have enough liquidity.';
@@ -100,6 +103,10 @@ export function BorrowDrawer({
           { address: V2_CONTRACTS.lendingPool, abi: lendingPoolV2Abi, functionName: 'liquidationThresholdBps' },
           { address: V2_CONTRACTS.lendingPool, abi: lendingPoolV2Abi, functionName: 'borrowRatePerSecond', args: [assetAddress] },
           { address: V2_CONTRACTS.lendingPool, abi: lendingPoolV2Abi, functionName: 'canBorrow', args: [collateralAddress, assetAddress] },
+          { address: V2_CONTRACTS.lendingPool, abi: lendingPoolV2Abi, functionName: 'isEligibleCollateralForDebt', args: [CONTRACTS.usdc, CONTRACTS.usdc] },
+          { address: V2_CONTRACTS.lendingPool, abi: lendingPoolV2Abi, functionName: 'isEligibleCollateralForDebt', args: [CONTRACTS.usdc, CONTRACTS.eurc] },
+          { address: V2_CONTRACTS.lendingPool, abi: lendingPoolV2Abi, functionName: 'isEligibleCollateralForDebt', args: [CONTRACTS.eurc, CONTRACTS.usdc] },
+          { address: V2_CONTRACTS.lendingPool, abi: lendingPoolV2Abi, functionName: 'isEligibleCollateralForDebt', args: [CONTRACTS.eurc, CONTRACTS.eurc] },
           { address: V2_CONTRACTS.oracleAdapter, abi: oracleAdapterV2Abi, functionName: 'isHealthy', args: [CONTRACTS.usdc] },
           { address: V2_CONTRACTS.oracleAdapter, abi: oracleAdapterV2Abi, functionName: 'isHealthy', args: [CONTRACTS.eurc] },
         ]
@@ -139,6 +146,29 @@ export function BorrowDrawer({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // A cross-asset loan needs the asset the user actually staked as collateral.
+  // Avoid opening the drawer in a combination that is guaranteed to revert.
+  useEffect(() => {
+    if (!open || !data) return;
+
+    const hasUsdcStake = ((data[0]?.result as bigint) ?? 0n) > 0n;
+    const hasEurcStake = ((data[1]?.result as bigint) ?? 0n) > 0n;
+    if (hasUsdcStake && !hasEurcStake && collateralAsset !== 'USDC') {
+      setCollateralAsset('USDC');
+      setAsset('EURC');
+      setAmount('');
+      setTransactionError(null);
+      borrowWrite.reset();
+    } else if (hasEurcStake && !hasUsdcStake && collateralAsset !== 'EURC') {
+      setCollateralAsset('EURC');
+      setAsset('USDC');
+      setAmount('');
+      setTransactionError(null);
+      borrowWrite.reset();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, data, collateralAsset]);
 
   const renderShell = (children: React.ReactNode) => (
     <AnimatePresence>
@@ -185,13 +215,29 @@ export function BorrowDrawer({
   const liquidationThresholdBps = Number((data[5]?.result as bigint) ?? 8_330n);
   const ratePerSecond = (data[6]?.result as bigint) ?? 0n;
   const borrowPairEnabled = data[7]?.result === true;
-  const oracleAvailable = data[8]?.result === true && data[9]?.result === true;
+  const usdcForUsdc = data[8]?.result === true;
+  const usdcForEurc = data[9]?.result === true;
+  const eurcForUsdc = data[10]?.result === true;
+  const eurcForEurc = data[11]?.result === true;
+  const oracleAvailable = data[12]?.result === true && data[13]?.result === true;
   const eurcUsdPrice = TESTNET_ORACLE.initialPrice;
 
-  const totalCollateralUsd = stakedUsdc + stakedEurc * eurcUsdPrice;
   const usdcDebt = usdcLoan ? Number(formatUnits(usdcLoan[0] + usdcLoan[1] + usdcLoan[2], 6)) : 0;
   const eurcDebt = eurcLoan ? Number(formatUnits(eurcLoan[0] + eurcLoan[1] + eurcLoan[2], 6)) : 0;
   const totalDebtUsd = usdcDebt + eurcDebt * eurcUsdPrice;
+
+  // Match LendingPoolV2._backsAnyActiveDebt(): a staked asset only contributes
+  // to the risk calculation when it is configured as collateral for at least
+  // one current (or the proposed) debt asset.
+  const hasUsdcDebtAfterBorrow = usdcDebt > 0 || asset === 'USDC';
+  const hasEurcDebtAfterBorrow = eurcDebt > 0 || asset === 'EURC';
+  const activeUsdcCollateral = hasUsdcDebtAfterBorrow && usdcForUsdc
+    || hasEurcDebtAfterBorrow && usdcForEurc;
+  const activeEurcCollateral = hasUsdcDebtAfterBorrow && eurcForUsdc
+    || hasEurcDebtAfterBorrow && eurcForEurc;
+  const totalCollateralUsd = (activeUsdcCollateral ? stakedUsdc : 0)
+    + (activeEurcCollateral ? stakedEurc * eurcUsdPrice : 0);
+  const selectedCollateralAmount = collateralAsset === 'USDC' ? stakedUsdc : stakedEurc;
 
   const borrowAmount = amountWei > 0n ? Number(formatUnits(amountWei, 6)) : 0;
   const borrowAmountUsd = asset === 'EURC' ? borrowAmount * eurcUsdPrice : borrowAmount;
@@ -218,16 +264,19 @@ export function BorrowDrawer({
   const borrowApr = secondsRateToApr(ratePerSecond);
 
   const noCollateral = totalCollateralUsd === 0;
+  const noSelectedCollateral = selectedCollateralAmount === 0;
   const exceedsMaxLtv = borrowAmountUsd > 0 && projectedLtvBps > maxLtvBps;
   const lowHealthFactor = borrowAmountUsd > 0 && hfAfter < 1.2;
   const isValidAmount = oracleAvailable && borrowPairEnabled && collateralAsset !== asset
-    && amountWei > 0n && !noCollateral && !exceedsMaxLtv && !lowHealthFactor;
+    && amountWei > 0n && !noCollateral && !noSelectedCollateral && !exceedsMaxLtv && !lowHealthFactor;
   const success = borrowTx.isSuccess;
 
   const helperText = !oracleAvailable
     ? `${TESTNET_ORACLE.pair} testnet price is unavailable. Borrowing is disabled.`
     : !borrowPairEnabled || collateralAsset === asset
       ? 'Choose the opposite staked asset as collateral.'
+    : noSelectedCollateral
+      ? `You need an active ${collateralAsset} stake to use it as collateral.`
     : noCollateral
       ? 'Stake or deposit collateral before borrowing.'
     : exceedsMaxLtv
@@ -289,7 +338,7 @@ export function BorrowDrawer({
                     setTransactionError(null);
                     borrowWrite.reset();
                   }}
-                  disabled={isBusy}
+                  disabled={isBusy || (item === 'USDC' ? stakedUsdc === 0 : stakedEurc === 0)}
                 >
                   <TokenIcon symbol={item} size={20} />
                   {item}
@@ -336,7 +385,7 @@ export function BorrowDrawer({
                     borrowWrite.reset();
                   }
                 }}
-                disabled={isBusy}
+                disabled={isBusy || noSelectedCollateral || !oracleAvailable}
               />
               <button
                 className="drawer-max-btn"
@@ -345,7 +394,7 @@ export function BorrowDrawer({
                   setTransactionError(null);
                   borrowWrite.reset();
                 }}
-                disabled={isBusy}
+                disabled={isBusy || noSelectedCollateral || !oracleAvailable}
               >
                 MAX
               </button>
@@ -418,9 +467,9 @@ export function BorrowDrawer({
             </div>
           </div>
 
-          <p className={`borrow-helper ${!oracleAvailable || noCollateral || exceedsMaxLtv || lowHealthFactor ? 'borrow-helper--danger' : ''}`}>
+          <p className={`borrow-helper ${!oracleAvailable || noCollateral || noSelectedCollateral || exceedsMaxLtv || lowHealthFactor ? 'borrow-helper--danger' : ''}`}>
             <span className="borrow-helper__icon" aria-hidden="true">
-              {!oracleAvailable || noCollateral || exceedsMaxLtv || lowHealthFactor ? '!' : 'i'}
+              {!oracleAvailable || noCollateral || noSelectedCollateral || exceedsMaxLtv || lowHealthFactor ? '!' : 'i'}
             </span>
             <span>{helperText}</span>
           </p>

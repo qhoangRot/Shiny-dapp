@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { formatUnits } from 'viem';
 import { useAccount, useReadContract } from 'wagmi';
-import { CONTRACTS, TESTNET_ORACLE, priceOracleAbi } from '../config/contracts';
+import { CONTRACTS, TESTNET_ORACLE, V2_CONTRACTS, oracleAdapterV2Abi } from '../config/contracts';
 import {
   benefitsForTier,
   buildCreditChanges,
@@ -9,7 +9,7 @@ import {
   calculateCreditBreakdown,
   tierForScore,
 } from '../lib/creditScore';
-import { usePositions } from './usePositions';
+import { useV2Positions } from './useV2Positions';
 
 export function useCreditScore() {
   const { address } = useAccount();
@@ -17,9 +17,8 @@ export function useCreditScore() {
     positions,
     isLoading: positionsLoading,
     isError: positionsError,
-    dataUpdatedAt: positionsUpdatedAt,
     refetch: refetchPositions,
-  } = usePositions();
+  } = useV2Positions();
 
   const {
     data: oracleData,
@@ -29,9 +28,10 @@ export function useCreditScore() {
     dataUpdatedAt: oracleUpdatedAt,
     refetch: refetchOracle,
   } = useReadContract({
-    address: CONTRACTS.priceOracle,
-    abi: priceOracleAbi,
-    functionName: 'viewPrice',
+    address: V2_CONTRACTS.oracleAdapter,
+    abi: oracleAdapterV2Abi,
+    functionName: 'lastAcceptedPrice',
+    args: [CONTRACTS.eurc],
     query: {
       enabled: Boolean(address),
       staleTime: 15_000,
@@ -40,8 +40,8 @@ export function useCreditScore() {
     },
   });
 
-  const eurUsdPrice = oracleData?.[0]
-    ? Number(formatUnits(oracleData[0], 18))
+  const eurUsdPrice = oracleData
+    ? Number(formatUnits(oracleData, 18))
     : TESTNET_ORACLE.initialPrice;
 
   const model = useMemo(() => {
@@ -65,8 +65,8 @@ export function useCreditScore() {
     isLoading: positionsLoading || oracleLoading,
     isError: positionsError || oracleError,
     isFetching,
-    dataUpdatedAt: Math.max(positionsUpdatedAt, oracleUpdatedAt),
-    oracleTimestamp: oracleData?.[1] ? Number(oracleData[1]) * 1000 : 0,
+    dataUpdatedAt: oracleUpdatedAt,
+    oracleTimestamp: 0,
     refetch,
   };
 }

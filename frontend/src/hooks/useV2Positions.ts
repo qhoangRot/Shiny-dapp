@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useAccount, useReadContract, useReadContracts } from 'wagmi';
 import { V2_CONTRACTS, stakingVaultV2Abi } from '../config/contracts';
 
@@ -22,6 +22,7 @@ type PositionResult = [
 
 export function useV2Positions() {
   const { address } = useAccount();
+  const lastResolvedPositionsRef = useRef<V2StakePosition[]>([]);
   const idsRead = useReadContract({
     address: V2_CONTRACTS.stakingVault,
     abi: stakingVaultV2Abi,
@@ -40,7 +41,7 @@ export function useV2Positions() {
     query: { enabled: Boolean(address) && positionIds.length > 0, staleTime: 10_000, refetchInterval: 10_000 },
   });
 
-  const positions = useMemo<V2StakePosition[]>(() => {
+  const resolvedPositions = useMemo<V2StakePosition[]>(() => {
     if (!address || !detailsRead.data) return [];
     const account = address.toLowerCase();
     return positionIds.flatMap((id, index) => {
@@ -52,13 +53,37 @@ export function useV2Positions() {
     });
   }, [address, detailsRead.data, positionIds]);
 
+  const hasCompleteDetails = positionIds.length === 0
+    || (detailsRead.data?.length ?? 0) === positionIds.length;
+
+  useEffect(() => {
+    if (!address) {
+      lastResolvedPositionsRef.current = [];
+      return;
+    }
+
+    if (hasCompleteDetails) {
+      lastResolvedPositionsRef.current = resolvedPositions;
+    }
+  }, [address, hasCompleteDetails, resolvedPositions]);
+
+  // A new stake changes the query key from N positions to N + 1. Keep the
+  // previously resolved rows visible while the RPC fetches the new detail row,
+  // rather than briefly replacing the whole portfolio with an empty/loading UI.
+  const positions = hasCompleteDetails
+    ? resolvedPositions
+    : lastResolvedPositionsRef.current;
+
   const refetch = useCallback(async () => {
     await Promise.all([idsRead.refetch(), detailsRead.refetch()]);
   }, [detailsRead, idsRead]);
 
   return {
     positions,
-    isLoading: Boolean(address) && (idsRead.isLoading || (positionIds.length > 0 && detailsRead.isLoading)),
+    // `isLoading` is reserved for the first portfolio read. Subsequent
+    // refetches keep the existing rows rendered, preventing the dashboard
+    // from flashing back to an empty/loading state after a confirmed stake.
+    isLoading: Boolean(address) && idsRead.isLoading && idsRead.data === undefined,
     isError: idsRead.isError || detailsRead.isError,
     refetch,
   };

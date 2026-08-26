@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentType, type CSSProperties } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useChainId } from 'wagmi';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -9,12 +9,21 @@ import { MarketsPage } from './components/MarketsPage';
 import { PositionsPage } from './components/PositionsPage';
 import { CreditScorePage } from './components/CreditScorePage';
 import { AnalyticsPage } from './components/AnalyticsPage';
+import { DocsPage } from './components/DocsPage';
 import { SmoothScroll } from './components/SmoothScroll';
 import './App.css';
 
-type View = 'landing' | 'app' | 'markets' | 'positions' | 'credit-score' | 'analytics';
+type View = 'landing' | 'docs' | 'app' | 'markets' | 'positions' | 'credit-score' | 'analytics';
+type LandingNavItem = 'markets' | 'protocol' | 'faq' | 'docs';
 
-const NAV_ITEMS: { label: string; view: Exclude<View, 'landing'> }[] = [
+const LANDING_NAV_INDEX: Record<LandingNavItem, number> = {
+  markets: 0,
+  protocol: 1,
+  faq: 2,
+  docs: 3,
+};
+
+const NAV_ITEMS: { label: string; view: Exclude<View, 'landing' | 'docs'> }[] = [
   { label: 'Dashboard', view: 'app' },
   { label: 'Markets', view: 'markets' },
   { label: 'My Positions', view: 'positions' },
@@ -22,15 +31,36 @@ const NAV_ITEMS: { label: string; view: Exclude<View, 'landing'> }[] = [
   { label: 'Analytics', view: 'analytics' },
 ];
 
+// LandingPage has local, not-yet-committed connect-intent work. Keep App
+// compatible with both that draft and the currently deployed public API.
+const CompatibleLandingPage = LandingPage as ComponentType<{
+  onLaunch: () => void;
+  onConnectIntent: () => void;
+  onOpenDocs: () => void;
+  onHeaderThemeChange: (theme: 'dark' | 'light') => void;
+  onHeaderExitProgressChange: (progress: number) => void;
+}>;
+
 function App() {
   const { isConnected } = useAccount();
   const chainId = useChainId();
-  const [view, setView] = useState<View>('landing');
+  const [view, setView] = useState<View>(() => window.location.pathname === '/docs' ? 'docs' : 'landing');
+  const [activeLandingNav, setActiveLandingNav] = useState<LandingNavItem | null>(() =>
+    window.location.pathname === '/docs' ? 'docs' : null,
+  );
   const [landingHeaderTheme, setLandingHeaderTheme] = useState<'dark' | 'light'>('dark');
   const [curtainActive, setCurtainActive] = useState(false);
   const curtainTimers = useRef<number[]>([]);
   const landingHeaderRef = useRef<HTMLElement>(null);
-  const showApp = isConnected && view !== 'landing';
+  const showApp = isConnected && view !== 'landing' && view !== 'docs';
+
+  const navigateAppView = useCallback((nextView: Exclude<View, 'landing' | 'docs'>) => {
+    setView((currentView) => currentView === nextView ? currentView : nextView);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (showApp) window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [showApp, view]);
 
   const updateLandingHeaderExit = useCallback((progress: number) => {
     const header = landingHeaderRef.current;
@@ -46,12 +76,101 @@ function App() {
     return () => curtainTimers.current.forEach((timer) => window.clearTimeout(timer));
   }, []);
 
+  useEffect(() => {
+    const handlePopState = () => {
+      const isDocs = window.location.pathname === '/docs';
+      setView(isDocs ? 'docs' : 'landing');
+      setActiveLandingNav(isDocs ? 'docs' : null);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (view === 'docs') window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [view]);
+
+  useEffect(() => {
+    if (view !== 'landing') return;
+
+    // The capsule follows only the sections represented by the landing nav.
+    // Other landing sections deliberately leave the last matching item in
+    // place instead of making the indicator jump or disappear mid-scroll.
+    const sections: Array<{ id: string; item: Exclude<LandingNavItem, 'docs'> }> = [
+      { id: 'markets-section', item: 'markets' },
+      { id: 'protocol-section', item: 'protocol' },
+      { id: 'faq-section', item: 'faq' },
+    ];
+    let frame = 0;
+
+    const updateActiveSection = () => {
+      frame = 0;
+      const activationLine = window.innerHeight * 0.42;
+      let nextItem: LandingNavItem | null = null;
+
+      for (const section of sections) {
+        const element = document.getElementById(section.id);
+        if (element && element.getBoundingClientRect().top <= activationLine) {
+          nextItem = section.item;
+        }
+      }
+
+      setActiveLandingNav((currentItem) =>
+        currentItem === nextItem ? currentItem : nextItem,
+      );
+    };
+
+    const onScroll = () => {
+      if (!frame) frame = window.requestAnimationFrame(updateActiveSection);
+    };
+
+    updateActiveSection();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [view]);
+
   const goLanding = () => {
     setView('landing');
+    window.history.pushState({}, '', '/');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const goApp = useCallback(() => setView('app'), []);
+  const goDocs = () => {
+    setActiveLandingNav('docs');
+    setView('docs');
+    window.history.pushState({}, '', '/docs');
+  };
+
+  const goLandingSection = useCallback((sectionId: string) => {
+    const sectionNavigation: Record<string, LandingNavItem> = {
+      'markets-section': 'markets',
+      'protocol-section': 'protocol',
+      'faq-section': 'faq',
+    };
+    setActiveLandingNav(sectionNavigation[sectionId] ?? null);
+    setView('landing');
+    window.history.pushState({}, '', `/#${sectionId}`);
+
+    // Landing mounts after the view change. Route this through Lenis instead
+    // of native scrollIntoView so a click always interrupts existing momentum.
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        window.dispatchEvent(
+          new CustomEvent('shiny:scroll-to-section', { detail: { id: sectionId } }),
+        );
+      });
+    });
+  }, []);
+
+  const goApp = useCallback(() => {
+    navigateAppView('app');
+    if (window.location.pathname === '/docs') window.history.pushState({}, '', '/');
+  }, [navigateAppView]);
 
   const launchApp = useCallback(() => {
     if (curtainActive) return;
@@ -79,11 +198,11 @@ function App() {
   };
 
   return (
-    <div className={`app-shell ${showApp ? 'app-shell--protocol' : 'app-shell--landing'}`}>
+    <div className={`app-shell ${showApp ? 'app-shell--protocol' : view === 'docs' ? 'app-shell--docs' : 'app-shell--landing'}`}>
       <header
         ref={landingHeaderRef}
         className={`app-header ${
-          !showApp ? `landing-header landing-header--${landingHeaderTheme}` : ''
+          view === 'docs' ? 'docs-app-header' : !showApp ? `landing-header landing-header--${landingHeaderTheme}` : ''
         }`}
       >
         <button type="button" className="app-header__left" onClick={goLanding}>
@@ -100,7 +219,7 @@ function App() {
                 href="#"
                 onClick={(event) => {
                   event.preventDefault();
-                  setView(item.view);
+                  navigateAppView(item.view);
                 }}
               >
                 {item.label}
@@ -108,10 +227,16 @@ function App() {
             ))}
           </nav>
         ) : (
-          <nav className="landing-nav" aria-label="Landing page">
-            <a href="#markets-section">MARKETS</a>
-            <a href="#protocol-section">PROTOCOL</a>
-            <a href="#faq-section">FAQ</a>
+          <nav
+            className="landing-nav"
+            aria-label="Landing page"
+            style={activeLandingNav === null ? undefined : { '--landing-nav-index': LANDING_NAV_INDEX[activeLandingNav] } as CSSProperties}
+          >
+            <span className={`landing-nav__active-pill${activeLandingNav === null ? ' is-hidden' : ''}`} aria-hidden="true" />
+            <a className={activeLandingNav === 'markets' ? 'is-active' : ''} href="/#markets-section" onClick={(event) => { event.preventDefault(); goLandingSection('markets-section'); }}>MARKETS</a>
+            <a className={activeLandingNav === 'protocol' ? 'is-active' : ''} href="/#protocol-section" onClick={(event) => { event.preventDefault(); goLandingSection('protocol-section'); }}>PROTOCOL</a>
+            <a className={activeLandingNav === 'faq' ? 'is-active' : ''} href="/#faq-section" onClick={(event) => { event.preventDefault(); goLandingSection('faq-section'); }}>FAQ</a>
+            <a className={activeLandingNav === 'docs' ? 'is-active' : ''} href="/docs" onClick={(event) => { event.preventDefault(); goDocs(); }}>DOCS</a>
           </nav>
         )}
 
@@ -134,37 +259,32 @@ function App() {
       </header>
 
       <main className="app-main">
-        <AnimatePresence mode="wait">
-          {showApp ? (
+        {view === 'docs' ? (
+          <DocsPage />
+        ) : showApp ? (
+          <AnimatePresence mode="popLayout">
             <motion.div
               key={view}
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -16 }}
-              transition={{ duration: 0.35, ease: 'easeOut' }}
-              style={{ width: '100%', display: 'flex', justifyContent: 'center' }}
-            >
-              {renderAppView()}
-            </motion.div>
-          ) : (
-            <motion.div
-              key="landing"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.28, ease: 'easeOut' }}
-              style={{ width: '100%' }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              style={{ width: '100%', display: 'flex', justifyContent: 'center', willChange: 'opacity' }}
             >
-              <SmoothScroll>
-                <LandingPage
-                  onLaunch={launchApp}
-                  onHeaderThemeChange={setLandingHeaderTheme}
-                  onHeaderExitProgressChange={updateLandingHeaderExit}
-                />
-              </SmoothScroll>
+              {renderAppView()}
             </motion.div>
-          )}
-        </AnimatePresence>
+          </AnimatePresence>
+        ) : (
+          <SmoothScroll>
+            <CompatibleLandingPage
+              onLaunch={launchApp}
+              onConnectIntent={() => undefined}
+              onOpenDocs={goDocs}
+              onHeaderThemeChange={setLandingHeaderTheme}
+              onHeaderExitProgressChange={updateLandingHeaderExit}
+            />
+          </SmoothScroll>
+        )}
       </main>
 
       <div className={`route-curtain ${curtainActive ? 'route-curtain--active' : ''}`} aria-hidden="true">

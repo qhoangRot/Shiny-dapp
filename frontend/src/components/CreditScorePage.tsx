@@ -373,7 +373,7 @@ export function CreditScorePage() {
       <div className="testnet-data-note">
         <span className="simulated-badge">Testnet preview</span>
         <span>
-          Credit scoring service is not deployed yet. Current score is a transparent local model using live stake data and the
+          Legacy (V1) positions are not included in this view. Credit scoring service is not deployed yet. Current score is a transparent local model using live stake data and the
           {' '}manual EUR/USD oracle snapshot ({oracleTimestamp ? formatDate(oracleTimestamp) : 'configured baseline'}).
         </span>
       </div>

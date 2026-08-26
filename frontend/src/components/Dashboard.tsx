@@ -12,36 +12,92 @@ import {
   REWARD_DISTRIBUTOR_ADDRESS,
   TESTNET_ORACLE,
   V2_CONTRACTS,
-  lendingPoolAbi,
-  priceOracleAbi,
   rewardDistributorAbi,
   stakingVaultAbi,
   stakingVaultV2Abi,
+  oracleAdapterV2Abi,
 } from '../config/contracts';
 import { CountUp } from './CountUp';
 import { TokenIcon } from './TokenIcon';
 import { HealthFactorGauge } from './HealthFactorGauge';
 import { InfoTip } from './InfoTip';
-import { usePositions, type StakePosition } from '../hooks/usePositions';
+import { type StakePosition } from '../hooks/usePositions';
 import { useV2Positions, type V2StakePosition } from '../hooks/useV2Positions';
 import { useV2PositionRewards, type V2PositionRewardState } from '../hooks/useV2PositionRewards';
 import { useV2Loans } from '../hooks/useV2Loans';
-import {
-  usePositionRewards,
-  type PositionRewardState,
-} from '../hooks/usePositionRewards';
-import { useRefreshProtocolData } from '../hooks/useRefreshProtocolData';
+import { type PositionRewardState } from '../hooks/usePositionRewards';
 import { formatRewardDisplay, MIN_CLAIMABLE_REWARD } from '../lib/rewards';
 import { StakeDrawer } from './StakeDrawer';
 import { BorrowDrawer } from './BorrowDrawer';
-import { RepayDrawer } from './RepayDrawer';
 import { V2RepayDrawer } from './V2RepayDrawer';
 
-const MAX_HF_THRESHOLD = 1_000_000;
 const TIER_LABELS = ['Flexible', 'Growth', 'Diamond'];
+const PENALTY_FREE_PERIOD = 90 * 24 * 60 * 60;
+const PENALTY_FULL_PERIOD = 365 * 24 * 60 * 60;
+
+type OptimisticStake = {
+  asset: 'USDC' | 'EURC';
+  amount: bigint;
+};
 
 function tokenSymbol(asset: string): 'USDC' | 'EURC' {
   return asset.toLowerCase() === CONTRACTS.usdc.toLowerCase() ? 'USDC' : 'EURC';
+}
+
+function withdrawalPenaltyBps(stakedAt: bigint) {
+  const elapsed = Math.max(0, Math.floor(Date.now() / 1000) - Number(stakedAt));
+  if (elapsed <= PENALTY_FREE_PERIOD) return 10_000;
+  if (elapsed >= PENALTY_FULL_PERIOD) return 0;
+  return Math.round(((PENALTY_FULL_PERIOD - elapsed) * 10_000) / (PENALTY_FULL_PERIOD - PENALTY_FREE_PERIOD));
+}
+
+function CapitalAccountPanel({
+  positions,
+  getReward,
+  loans,
+  oracleHealthy,
+  usdcPrice,
+  eurcPrice,
+  loading,
+  error,
+  onRetry,
+  optimisticStake,
+}: {
+  positions: V2StakePosition[];
+  getReward: (position: V2StakePosition) => V2PositionRewardState;
+  loans: ReturnType<typeof useV2Loans>['loans'];
+  oracleHealthy: boolean;
+  usdcPrice: number;
+  eurcPrice: number;
+  loading: boolean;
+  error: boolean;
+  onRetry: () => void;
+  optimisticStake: OptimisticStake | null;
+}) {
+  if (loading) return <div className="capital-account glass-panel"><div className="capital-account__skeleton" /><div className="capital-account__skeleton" /></div>;
+  if (error) return <div className="capital-account glass-panel capital-account--error"><strong>Capital account unavailable</strong><button type="button" onClick={onRetry}>Retry</button></div>;
+  if (positions.length === 0 && !optimisticStake) return null;
+  const assets = (['USDC', 'EURC'] as const).map((symbol) => {
+    const price = symbol === 'USDC' ? usdcPrice : eurcPrice;
+    const rows = positions.filter((p) => tokenSymbol(p.asset) === symbol);
+    const optimisticAmount = optimisticStake?.asset === symbol ? optimisticStake.amount : 0n;
+    const staked = rows.reduce((sum, p) => sum + p.principal, 0n) + optimisticAmount;
+    const rewards = rows.reduce((sum, p) => sum + getReward(p).amount, 0n);
+    const debt = loans.filter((l) => l.asset === symbol).reduce((sum, l) => sum + l.debt, 0n);
+    const stakedValue = Number(formatUnits(staked, 6));
+    const rewardValue = Number(formatUnits(rewards, 6));
+    const debtValue = Number(formatUnits(debt, 6));
+    return { symbol, price, stakedValue, rewardValue, debtValue, net: stakedValue + rewardValue - debtValue, collateralUsd: stakedValue * price };
+  });
+  const portfolioCollateralUsd = assets.reduce((sum, asset) => sum + asset.collateralUsd, 0);
+  return <section className="capital-account glass-panel">
+    <div className="capital-account__header"><div><span className="card-kicker">CAPITAL ACCOUNT</span><h3>Capital that stays useful</h3></div><span className="capital-account__scope">Your active positions</span></div>
+    <div className="capital-account__assets">{assets.map((asset) => <div className="capital-account__asset" key={asset.symbol}>
+      <div className="capital-account__asset-title"><TokenIcon symbol={asset.symbol} size={24} /><strong>{asset.symbol}</strong></div>
+      <div className="capital-account__metrics"><span>Staked<strong>{asset.stakedValue.toFixed(2)} {asset.symbol}</strong></span><span>Pending reward<strong>{asset.rewardValue.toFixed(4)} {asset.symbol}</strong></span><span>Debt<strong>{asset.debtValue.toFixed(4)} {asset.symbol}</strong></span><span>Net position<strong>{asset.net.toFixed(2)} {asset.symbol}</strong></span></div>
+    </div>)}</div>
+    <div className="credit-lines"><div className="capital-account__header"><span className="card-kicker">CREDIT LINE</span><span className="capital-account__scope">Portfolio collateral · 75% max LTV</span></div>{!oracleHealthy ? <div className="credit-line__stale">Price refresh needed. Credit lines and risk previews are temporarily unavailable.</div> : <div className="credit-lines__grid">{assets.map((asset) => { const limit = portfolioCollateralUsd * 0.75 / asset.price; const used = asset.debtValue; const available = Math.max(limit - used, 0); const utilization = limit > 0 ? Math.min(used / limit, 1) : 0; const utilizationTone = utilization > 0.75 ? 'credit-line__bar--high' : utilization > 0.5 ? 'credit-line__bar--medium' : 'credit-line__bar--low'; return <div className="credit-line" key={asset.symbol}><div className="credit-line__top"><strong>{asset.symbol} Credit Line</strong><span>{(utilization * 100).toFixed(0)}% used</span></div><div className={`credit-line__bar ${utilizationTone}`}><i style={{ width: `${utilization * 100}%` }} /></div><div className="credit-line__values"><span>Limit<strong>{limit.toFixed(2)} {asset.symbol}</strong></span><span>Used<strong>{used.toFixed(4)} {asset.symbol}</strong></span><span>Available<strong>{available.toFixed(2)} {asset.symbol}</strong></span></div></div>})}</div>}</div>
+  </section>;
 }
 
 /// Nut hanh dong cho 1 position: goi thang contract (claimReward / withdraw)
@@ -373,7 +429,6 @@ export function StakePositionRow({
         </span>
       </td>
       <td>{TIER_LABELS[position.tier] ?? '—'}</td>
-      <td><span className="protocol-badge protocol-badge--legacy">Legacy</span></td>
       <td className="numeric-cell">{amount.toFixed(2)}</td>
       <td className="numeric-cell">
         {rewardsLoading ? (
@@ -488,7 +543,6 @@ export function V2StakePositionRow({ position, reward, onDone }: {
   return <tr>
     <td><span className="asset-with-icon"><TokenIcon symbol={symbol} size={22} />{symbol}</span></td>
     <td>{TIER_LABELS[position.tier] ?? '—'}</td>
-    <td><span className="protocol-badge protocol-badge--v2">V2</span></td>
     <td className="numeric-cell">{Number(formatUnits(position.principal, 6)).toFixed(2)}</td>
     <td className="numeric-cell">{formatRewardDisplay(reward.amount, symbol, false).label}</td>
     <td><span className={`position-lock${isLocked ? ' position-lock--locked' : ''}`}>{isLocked ? 'Locked' : 'Unlocked'}</span></td>
@@ -501,65 +555,41 @@ export function V2StakePositionRow({ position, reward, onDone }: {
 
 export function Dashboard() {
   const { address } = useAccount();
-  const {
-    positions,
-    isLoading: positionsLoading,
-    refetch: refetchPositions,
-  } = usePositions();
-  const {
-    getReward,
-    isLoading: rewardsLoading,
-    refreshAfterClaim,
-  } = usePositionRewards(positions);
   const [stakeDrawerOpen, setStakeDrawerOpen] = useState(false);
   const [borrowDrawerOpen, setBorrowDrawerOpen] = useState(false);
-  const [selectedRepayAsset, setSelectedRepayAsset] = useState<{ asset: 'USDC' | 'EURC'; deployment: 'v1' | 'v2' } | null>(null);
+  const [selectedRepayAsset, setSelectedRepayAsset] = useState<'USDC' | 'EURC' | null>(null);
   const [optimisticStakedFloor, setOptimisticStakedFloor] = useState<number | null>(null);
+  const [optimisticStake, setOptimisticStake] = useState<OptimisticStake | null>(null);
   const {
     positions: v2Positions,
+    isLoading: v2PositionsLoading,
+    isError: v2PositionsError,
     refetch: refetchV2Positions,
   } = useV2Positions();
   const {
     getReward: getV2Reward,
+    isError: v2RewardsError,
     refetchRewards: refetchV2Rewards,
   } = useV2PositionRewards(v2Positions);
-  const v2LoansState = useV2Loans(!stakeDrawerOpen && !borrowDrawerOpen);
-  const refreshProtocolData = useRefreshProtocolData();
-  const refreshRetryRef = useRef<number | null>(null);
-  const readyAddressRef = useRef<`0x${string}` | undefined>(undefined);
-
-  const anyDrawerOpen = stakeDrawerOpen || borrowDrawerOpen || selectedRepayAsset !== null;
-
-  const {
-    data,
-    isLoading,
-    refetch: refetchDashboardReads,
-  } = useReadContracts({
-    contracts: address
-      ? [
-          { address: CONTRACTS.lendingPool, abi: lendingPoolAbi, functionName: 'collateralBalance', args: [address, CONTRACTS.usdc] },
-          { address: CONTRACTS.lendingPool, abi: lendingPoolAbi, functionName: 'collateralBalance', args: [address, CONTRACTS.eurc] },
-          { address: CONTRACTS.lendingPool, abi: lendingPoolAbi, functionName: 'loans', args: [address, CONTRACTS.usdc] },
-          { address: CONTRACTS.lendingPool, abi: lendingPoolAbi, functionName: 'loans', args: [address, CONTRACTS.eurc] },
-          { address: CONTRACTS.lendingPool, abi: lendingPoolAbi, functionName: 'getHealthFactor', args: [address] },
-          { address: CONTRACTS.priceOracle, abi: priceOracleAbi, functionName: 'viewPrice', args: [] },
-          { address: CONTRACTS.stakingVault, abi: stakingVaultAbi, functionName: 'getTotalStakedByUser', args: [address, CONTRACTS.usdc] },
-          { address: CONTRACTS.stakingVault, abi: stakingVaultAbi, functionName: 'getTotalStakedByUser', args: [address, CONTRACTS.eurc] },
-        ]
-      : [],
-    // Keep portfolio totals reasonably fresh while the dashboard is open.
-    // Transaction callbacks still force an immediate refetch.
-    query: { enabled: !!address, refetchInterval: anyDrawerOpen ? false : 10_000 },
+  // Keep the risk read alive while a drawer is open. Disabling it made an
+  // undefined read look like an unhealthy oracle, producing a false stale
+  // warning behind the Stake/Borrow/Repay panels.
+  const v2LoansState = useV2Loans();
+  const v2OraclePrices = useReadContracts({
+    contracts: address ? [
+      { address: V2_CONTRACTS.oracleAdapter, abi: oracleAdapterV2Abi, functionName: 'lastAcceptedPrice' as const, args: [CONTRACTS.usdc] as const },
+      { address: V2_CONTRACTS.oracleAdapter, abi: oracleAdapterV2Abi, functionName: 'lastAcceptedPrice' as const, args: [CONTRACTS.eurc] as const },
+    ] : [],
+    query: { enabled: Boolean(address), refetchInterval: 30_000, staleTime: 10_000 },
   });
+  const refreshRetryRef = useRef<number | null>(null);
 
   const refreshDashboard = useCallback(async () => {
     await Promise.all([
-      refreshProtocolData(),
-      refetchPositions(),
-      refetchDashboardReads(),
       refetchV2Positions(),
       refetchV2Rewards(),
       v2LoansState.refetch(),
+      v2OraclePrices.refetch(),
     ]);
 
     // Arc Testnet RPC nodes can briefly trail the receipt block. Verify once
@@ -570,46 +600,40 @@ export function Dashboard() {
 
     refreshRetryRef.current = window.setTimeout(() => {
       void Promise.all([
-        refetchPositions(),
-        refetchDashboardReads(),
         refetchV2Positions(),
+        refetchV2Rewards(),
         v2LoansState.refetch(),
       ]).then(() => {
         // Arc RPC nodes can lag the receipt block by more than one response.
         // A second short retry avoids requiring a manual page reload without
         // making the dashboard poll aggressively all the time.
         refreshRetryRef.current = window.setTimeout(() => {
-          void Promise.all([refetchPositions(), refetchDashboardReads()]);
+          void Promise.all([refetchV2Positions(), refetchV2Rewards(), v2LoansState.refetch()]);
           refreshRetryRef.current = null;
         }, 1_500);
       });
     }, 700);
   }, [
-    refreshProtocolData,
-    refetchDashboardReads,
-    refetchPositions,
     refetchV2Positions,
     refetchV2Rewards,
     v2LoansState,
+    v2OraclePrices,
   ]);
 
-  // Keep a temporary floor sourced from the confirmed transaction itself.
-  // Arc RPC reads can trail the receipt block briefly, so rendering only the
-  // refetched value makes totals jump backward before they catch up.
-  const liveOraclePrice = data?.[5]?.result as [bigint, bigint] | undefined;
-  const liveEurcUsdPrice = liveOraclePrice && liveOraclePrice[0] > 0n
-    ? Number(formatUnits(liveOraclePrice[0], 18))
-    : 0;
-  const liveStakedUsdc = Number(formatUnits((data?.[6]?.result as bigint) ?? 0n, 6));
-  const liveStakedEurc = Number(formatUnits((data?.[7]?.result as bigint) ?? 0n, 6));
-  const liveTotalStakedUsd = liveStakedUsdc + liveStakedEurc * liveEurcUsdPrice;
+  const liveUsdcPrice = Number(formatUnits((v2OraclePrices.data?.[0]?.result as bigint | undefined) ?? 1_000000000000000000n, 18));
+  const liveEurcUsdPrice = Number(formatUnits((v2OraclePrices.data?.[1]?.result as bigint | undefined) ?? 1_080000000000000000n, 18));
+  const liveTotalStakedUsd = v2Positions.reduce((total, position) => {
+    const amount = Number(formatUnits(position.principal, 6));
+    return total + amount * (tokenSymbol(position.asset) === 'EURC' ? liveEurcUsdPrice : liveUsdcPrice);
+  }, 0);
 
   useEffect(() => {
-    if (optimisticStakedFloor === null || !data) return;
+    if (optimisticStakedFloor === null) return;
     if (liveTotalStakedUsd + 0.000001 >= optimisticStakedFloor) {
       setOptimisticStakedFloor(null);
+      setOptimisticStake(null);
     }
-  }, [data, liveTotalStakedUsd, optimisticStakedFloor]);
+  }, [liveTotalStakedUsd, optimisticStakedFloor]);
 
   const handleStakeConfirmed = useCallback((stake: { asset: 'USDC' | 'EURC'; amount: bigint }) => {
     const tokenAmount = Number(formatUnits(stake.amount, 6));
@@ -617,11 +641,13 @@ export function Dashboard() {
     setOptimisticStakedFloor((currentFloor) => (
       Math.max(currentFloor ?? liveTotalStakedUsd, liveTotalStakedUsd) + usdDelta
     ));
+    setOptimisticStake({ asset: stake.asset, amount: stake.amount });
     return refreshDashboard();
   }, [liveEurcUsdPrice, liveTotalStakedUsd, refreshDashboard]);
 
   const handlePortfolioMutation = useCallback(() => {
     setOptimisticStakedFloor(null);
+    setOptimisticStake(null);
     return refreshDashboard();
   }, [refreshDashboard]);
 
@@ -633,8 +659,7 @@ export function Dashboard() {
 
   if (!address) return null;
 
-  const hasRenderedPortfolio = readyAddressRef.current === address;
-  if (!data || (!hasRenderedPortfolio && (isLoading || positionsLoading))) {
+  if (v2PositionsLoading && v2Positions.length === 0) {
     return (
       <div className="dashboard">
         <h2>Dashboard</h2>
@@ -642,32 +667,6 @@ export function Dashboard() {
       </div>
     );
   }
-
-  // Once a wallet has a complete snapshot, background reads for a newly
-  // created position must never replace the whole dashboard with a loader.
-  readyAddressRef.current = address;
-
-  const collateralUsdc = Number(formatUnits((data[0]?.result as bigint) ?? 0n, 6));
-  const collateralEurc = Number(formatUnits((data[1]?.result as bigint) ?? 0n, 6));
-
-  const usdcLoan = data[2]?.result as [bigint, bigint, bigint, boolean] | undefined;
-  const eurcLoan = data[3]?.result as [bigint, bigint, bigint, boolean] | undefined;
-  const usdcDebt = usdcLoan ? Number(formatUnits(usdcLoan[0] + usdcLoan[2], 6)) : 0;
-  const eurcDebt = eurcLoan ? Number(formatUnits(eurcLoan[2] + eurcLoan[0], 6)) : 0;
-
-  const hfRaw = data[4]?.result as bigint | undefined;
-  const hf = hfRaw !== undefined ? Number(formatUnits(hfRaw, 18)) : 0;
-  const hasLoans = hf > 0 && hf < MAX_HF_THRESHOLD;
-  const hasLiquidationRisk = hasLoans && hf < 1.2;
-
-  const oraclePrice = data[5]?.result as [bigint, bigint] | undefined;
-  const eurcUsdPrice = oraclePrice && oraclePrice[0] > 0n
-    ? Number(formatUnits(oraclePrice[0], 18))
-    : 0;
-  const oracleAvailable = eurcUsdPrice > 0;
-
-  const stakedUsdc = Number(formatUnits((data[6]?.result as bigint) ?? 0n, 6));
-  const stakedEurc = Number(formatUnits((data[7]?.result as bigint) ?? 0n, 6));
 
   const v2StakedUsdc = Number(formatUnits(
     v2Positions.filter((position) => tokenSymbol(position.asset) === 'USDC').reduce((total, position) => total + position.principal, 0n),
@@ -677,7 +676,7 @@ export function Dashboard() {
     v2Positions.filter((position) => tokenSymbol(position.asset) === 'EURC').reduce((total, position) => total + position.principal, 0n),
     6,
   ));
-  const v2EurcUsdPrice = TESTNET_ORACLE.initialPrice;
+  const v2EurcUsdPrice = liveEurcUsdPrice;
   const v2TotalStakedUsd = v2StakedUsdc + v2StakedEurc * v2EurcUsdPrice;
   const v2DebtUsd = v2LoansState.loans.reduce((total, loan) => total + Number(formatUnits(loan.debt, 6)) * (loan.asset === 'EURC' ? v2EurcUsdPrice : 1), 0);
   const v2CollateralUsd = v2TotalStakedUsd;
@@ -685,73 +684,68 @@ export function Dashboard() {
     ? (v2CollateralUsd * Number(v2LoansState.liquidationThresholdBps)) / (v2DebtUsd * 10_000)
     : 0;
   const v2HasLoans = v2DebtUsd > 0;
+  const v2UsdcPrice = Number(formatUnits((v2OraclePrices.data?.[0]?.result as bigint | undefined) ?? 1_000000000000000000n, 18));
+  const v2EurcPrice = Number(formatUnits((v2OraclePrices.data?.[1]?.result as bigint | undefined) ?? 1_080000000000000000n, 18));
+  const sortedV2Positions = [...v2Positions].sort((a, b) => withdrawalPenaltyBps(a.startTime) - withdrawalPenaltyBps(b.startTime));
 
-  const totalStakedUsd = Math.max(
-    stakedUsdc + stakedEurc * eurcUsdPrice + v2TotalStakedUsd,
-    optimisticStakedFloor ?? 0,
-  );
-  const totalCollateralUsd = collateralUsdc + collateralEurc * eurcUsdPrice;
-  const totalBorrowedUsd = usdcDebt + eurcDebt * eurcUsdPrice + v2DebtUsd;
-  const netWorthUsd = totalStakedUsd + totalCollateralUsd - totalBorrowedUsd;
+  const totalStakedUsd = Math.max(v2TotalStakedUsd, optimisticStakedFloor ?? 0);
+  const totalBorrowedUsd = v2DebtUsd;
+  const netWorthUsd = totalStakedUsd - totalBorrowedUsd;
+  const visibleOptimisticStake = optimisticStake
+    && optimisticStakedFloor !== null
+    && liveTotalStakedUsd + 0.000001 < optimisticStakedFloor
+    ? optimisticStake
+    : null;
 
-  const borrowRows = [
-    { symbol: 'USDC' as const, amount: usdcDebt, interest: usdcLoan ? Number(formatUnits(usdcLoan[2], 6)) : 0 },
-    { symbol: 'EURC' as const, amount: eurcDebt, interest: eurcLoan ? Number(formatUnits(eurcLoan[2], 6)) : 0 },
-  ].filter((row) => row.amount > 0).map((row) => ({ ...row, deployment: 'v1' as const }));
-  const allBorrowRows = [
-    ...borrowRows,
-    ...v2LoansState.loans.map((loan) => ({
+  const allBorrowRows = v2LoansState.loans.map((loan) => ({
       symbol: loan.asset,
       amount: Number(formatUnits(loan.debt, 6)),
       interest: Number(formatUnits(loan.storedInterest + loan.pendingInterest, 6)),
-      deployment: 'v2' as const,
-    })),
-  ];
+    }));
 
   return (
     <div className="dashboard">
       <h2>Dashboard</h2>
       <p className="text-secondary">Welcome back. Here's your portfolio overview.</p>
 
-      <div className={`oracle-disclosure ${oracleAvailable ? '' : 'oracle-disclosure--error'}`}>
+      <div className="oracle-disclosure">
         <span className="oracle-disclosure__badge">Testnet FX</span>
         <strong>
-          {oracleAvailable ? `1 EURC = $${eurcUsdPrice.toFixed(4)}` : `${TESTNET_ORACLE.pair} unavailable`}
+          {`1 EURC = $${v2EurcUsdPrice.toFixed(4)}`}
         </strong>
         <span>{TESTNET_ORACLE.label} · not a production oracle</span>
       </div>
 
       {!v2LoansState.oracleHealthy && (
         <div className="oracle-disclosure oracle-disclosure--error" role="status">
-          <span className="oracle-disclosure__badge">V2 Oracle</span>
+          <span className="oracle-disclosure__badge">Oracle</span>
           <strong>Price refresh needed</strong>
-          <span>V2 borrowing and risk previews are temporarily unavailable. Try again shortly.</span>
+          <span>Borrowing and risk previews are temporarily unavailable. Try again shortly.</span>
         </div>
       )}
 
-      {hasLiquidationRisk && (
+      {v2HasLoans && v2Hf < 1.2 && (
         <div className="risk-alert" role="alert">
           <span className="risk-alert__icon">!</span>
           <div>
             <strong>Your position is at risk of liquidation</strong>
             <span>
-              Health Factor: {hf.toFixed(2)}. Repay debt or add collateral to move away from the 1.00 liquidation threshold.
+              Health Factor: {v2Hf.toFixed(2)}. Repay debt or add collateral to move away from the 1.00 liquidation threshold.
             </span>
           </div>
         </div>
       )}
 
-      <div className={hasLoans && v2HasLoans ? 'hf-gauge-stack' : undefined}>
-        {hasLoans ? <HealthFactorGauge label="Legacy Health Factor" hf={hf} hasLoans /> : null}
+      <div>
         {v2HasLoans ? (
           <HealthFactorGauge
-            label="V2 Health Factor"
+            label="Health Factor"
             hf={v2Hf}
             hasLoans
             unavailable={!v2LoansState.oracleHealthy}
           />
         ) : null}
-        {!hasLoans && !v2HasLoans ? <HealthFactorGauge hf={0} hasLoans={false} /> : null}
+        {!v2HasLoans ? <HealthFactorGauge hf={0} hasLoans={false} /> : null}
       </div>
 
       <div className="dashboard-quick-actions">
@@ -762,6 +756,19 @@ export function Dashboard() {
           Borrow
         </button>
       </div>
+
+      <CapitalAccountPanel
+        positions={v2Positions}
+        getReward={getV2Reward}
+        loans={v2LoansState.loans}
+        oracleHealthy={v2LoansState.oracleHealthy}
+        usdcPrice={v2UsdcPrice}
+        eurcPrice={v2EurcPrice}
+        loading={v2PositionsLoading && v2Positions.length === 0}
+        error={v2PositionsError || v2RewardsError || v2LoansState.isError || v2OraclePrices.isError}
+        onRetry={() => { void Promise.all([refetchV2Positions(), refetchV2Rewards(), v2LoansState.refetch(), v2OraclePrices.refetch()]); }}
+        optimisticStake={visibleOptimisticStake}
+      />
 
       <div className="dashboard-banner">
         <div className="banner-card banner-card--primary glass-panel">
@@ -778,14 +785,14 @@ export function Dashboard() {
         </div>
         <div className="banner-card glass-panel">
           <span className="banner-card__label">Active Positions</span>
-          <span className="banner-card__value">{positions.length + v2Positions.length}</span>
+          <span className="banner-card__value">{v2Positions.length}</span>
         </div>
       </div>
 
       <div className="positions-grid">
         <div className="positions-panel glass-panel">
           <h3>Your Staking Positions</h3>
-          {positions.length + v2Positions.length === 0 ? (
+          {v2Positions.length === 0 ? (
             <div className="empty-state">
               <span className="empty-state__title">No Stakes Yet</span>
               <span className="empty-state__subtitle">Stake assets from your wallet to open a position</span>
@@ -796,7 +803,6 @@ export function Dashboard() {
                 <colgroup>
                   <col className="positions-col--asset" />
                   <col className="positions-col--vault" />
-                  <col className="positions-col--protocol" />
                   <col className="positions-col--amount" />
                   <col className="positions-col--reward" />
                   <col className="positions-col--lock" />
@@ -806,7 +812,6 @@ export function Dashboard() {
                   <tr>
                     <th>Asset</th>
                     <th>Vault</th>
-                    <th>Protocol</th>
                     <th className="numeric-cell">Amount</th>
                     <th className="numeric-cell">
                       <span className="table-header-label">
@@ -824,17 +829,7 @@ export function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
-                  {positions.map((p) => (
-                    <StakePositionRow
-                      key={p.id.toString()}
-                      position={p}
-                      reward={getReward(p.id)}
-                      rewardsLoading={rewardsLoading}
-                      onClaimDone={refreshAfterClaim}
-                      onDone={handlePortfolioMutation}
-                    />
-                  ))}
-                  {v2Positions.map((p) => (
+                  {sortedV2Positions.map((p) => (
                     <V2StakePositionRow
                       key={`v2-${p.id}`}
                       position={p}
@@ -860,7 +855,6 @@ export function Dashboard() {
               <table className="positions-table positions-table--borrows">
                 <colgroup>
                   <col className="positions-col--borrow-asset" />
-                  <col className="positions-col--protocol" />
                   <col className="positions-col--borrow-amount" />
                   <col className="positions-col--borrow-interest" />
                   <col className="positions-col--borrow-status" />
@@ -869,7 +863,6 @@ export function Dashboard() {
                 <thead>
                   <tr>
                     <th>Asset</th>
-                    <th>Protocol</th>
                     <th className="numeric-cell">Debt</th>
                     <th className="numeric-cell">Interest</th>
                     <th>Status</th>
@@ -878,14 +871,13 @@ export function Dashboard() {
                 </thead>
                 <tbody>
                   {allBorrowRows.map((row) => (
-                    <tr key={`${row.deployment}-${row.symbol}`}>
+                    <tr key={row.symbol}>
                       <td>
                         <span className="asset-with-icon">
                           <TokenIcon symbol={row.symbol} size={22} />
                           {row.symbol}
                         </span>
                       </td>
-                      <td><span className={`protocol-badge protocol-badge--${row.deployment === 'v1' ? 'legacy' : 'v2'}`}>{row.deployment === 'v1' ? 'Legacy' : 'V2'}</span></td>
                       <td className="numeric-cell">{row.amount.toFixed(2)}</td>
                       <td className="numeric-cell">{row.interest.toFixed(4)}</td>
                       <td><span className="status-pill status-pill--active">Active</span></td>
@@ -894,7 +886,7 @@ export function Dashboard() {
                           className="row-action-btn"
                           type="button"
                           aria-label={`Repay ${row.symbol}`}
-                          onClick={() => setSelectedRepayAsset({ asset: row.symbol, deployment: row.deployment })}
+                          onClick={() => setSelectedRepayAsset(row.symbol)}
                         >
                           Repay
                         </button>
@@ -920,15 +912,9 @@ export function Dashboard() {
         onTransactionConfirmed={refreshDashboard}
       />
 
-      <RepayDrawer
-        open={selectedRepayAsset?.deployment === 'v1'}
-        asset={selectedRepayAsset?.asset ?? 'USDC'}
-        onClose={() => setSelectedRepayAsset(null)}
-        onTransactionConfirmed={refreshDashboard}
-      />
       <V2RepayDrawer
-        open={selectedRepayAsset?.deployment === 'v2'}
-        asset={selectedRepayAsset?.asset ?? 'USDC'}
+        open={selectedRepayAsset !== null}
+        asset={selectedRepayAsset ?? 'USDC'}
         onClose={() => setSelectedRepayAsset(null)}
         onTransactionConfirmed={refreshDashboard}
       />

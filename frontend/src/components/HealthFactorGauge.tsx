@@ -28,13 +28,13 @@ export function HealthFactorGauge({
         <div className="hf-gauge__top">
           <span className="hf-gauge__label">
             {label}
-            <InfoTip text="Health Factor cannot be calculated until the V2 oracle price is refreshed." />
+            <InfoTip text="Health Factor cannot be calculated until the oracle price is refreshed." />
           </span>
           <span className="hf-gauge__status hf-gauge__status--neutral">Price refresh needed</span>
         </div>
         <div className="hf-gauge__value">—</div>
         <div className="hf-gauge__track hf-gauge__track--idle" aria-hidden="true" />
-        <p className="hf-gauge__hint">Risk data will return after the V2 oracle receives a fresh price.</p>
+        <p className="hf-gauge__hint">Risk data will return after the oracle receives a fresh price.</p>
       </section>
     );
   }
