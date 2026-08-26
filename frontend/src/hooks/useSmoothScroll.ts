@@ -30,6 +30,9 @@ export function useSmoothScroll() {
         duration: 1.05,
         lock: true,
         force: true,
+        onComplete: () => {
+          window.dispatchEvent(new CustomEvent('shiny:section-navigation-complete'));
+        },
       });
     };
     window.addEventListener('shiny:scroll-to-section', onSectionNavigation);

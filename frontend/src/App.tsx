@@ -52,6 +52,7 @@ function App() {
   const [curtainActive, setCurtainActive] = useState(false);
   const curtainTimers = useRef<number[]>([]);
   const landingHeaderRef = useRef<HTMLElement>(null);
+  const pendingLandingNavigation = useRef<Exclude<LandingNavItem, 'docs'> | null>(null);
   const showApp = isConnected && view !== 'landing' && view !== 'docs';
 
   const navigateAppView = useCallback((nextView: Exclude<View, 'landing' | 'docs'>) => {
@@ -105,6 +106,13 @@ function App() {
 
     const updateActiveSection = () => {
       frame = 0;
+
+      // While Lenis is moving to a clicked section, keep the capsule on the
+      // destination. Without this guard the scroll listener briefly restores
+      // the section we are leaving, producing a visible target -> old -> target
+      // jump in the navigation indicator.
+      if (pendingLandingNavigation.current) return;
+
       const activationLine = window.innerHeight * 0.42;
       let nextItem: LandingNavItem | null = null;
 
@@ -124,12 +132,19 @@ function App() {
       if (!frame) frame = window.requestAnimationFrame(updateActiveSection);
     };
 
+    const onSectionNavigationComplete = () => {
+      pendingLandingNavigation.current = null;
+      updateActiveSection();
+    };
+
     updateActiveSection();
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll);
+    window.addEventListener('shiny:section-navigation-complete', onSectionNavigationComplete);
     return () => {
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onScroll);
+      window.removeEventListener('shiny:section-navigation-complete', onSectionNavigationComplete);
       if (frame) window.cancelAnimationFrame(frame);
     };
   }, [view]);
@@ -141,6 +156,7 @@ function App() {
   };
 
   const goDocs = () => {
+    pendingLandingNavigation.current = null;
     setActiveLandingNav('docs');
     setView('docs');
     window.history.pushState({}, '', '/docs');
@@ -152,7 +168,9 @@ function App() {
       'protocol-section': 'protocol',
       'faq-section': 'faq',
     };
-    setActiveLandingNav(sectionNavigation[sectionId] ?? null);
+    const targetItem = sectionNavigation[sectionId] ?? null;
+    pendingLandingNavigation.current = targetItem === 'docs' ? null : targetItem;
+    setActiveLandingNav(targetItem);
     setView('landing');
     window.history.pushState({}, '', `/#${sectionId}`);
 
