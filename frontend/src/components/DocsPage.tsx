@@ -109,7 +109,7 @@ export function DocsPage() {
         <article className="shiny-docs-page__article">
           <section id="overview" className={sectionClass('overview')}>
             <p className="shiny-docs-page__eyebrow">OVERVIEW</p>
-            <h2>Overview</h2>
+            <h2>What is Shiny?</h2>
             <p className="shiny-docs-page__lead">Shiny is a stablecoin staking and lending protocol on Arc Testnet. It lets USDC and EURC positions stay productive while their value supports liquidity.</p>
             <p>Traditional staking often turns liquidity into a binary choice: keep funds staked for rewards, or withdraw them before they can be used. Shiny separates those decisions. A stake remains a position inside the vault; the protocol can recognize its value as collateral without treating the deposited principal as an amount the user may simply withdraw and borrow at the same time.</p>
             <p>In practice, this means a user can retain an active staking position, borrow the other supported stablecoin against its value, and keep monitoring the resulting risk through LTV and Health Factor. The collateral remains committed to the position until debt is repaid or, if necessary, liquidation is executed.</p>
