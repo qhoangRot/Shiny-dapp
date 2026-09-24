@@ -366,6 +366,7 @@ export function BorrowDrawer({
                 <button
                   key={item}
                   className={`asset-toggle__btn ${asset === item ? 'asset-toggle__btn--active' : ''}`}
+                  title={item === collateralAsset ? 'Borrow the opposite asset from your collateral.' : undefined}
                   onClick={() => {
                     setAsset(item);
                     if (item === collateralAsset) setCollateralAsset(item === 'USDC' ? 'EURC' : 'USDC');
@@ -373,7 +374,7 @@ export function BorrowDrawer({
                     setTransactionError(null);
                     borrowWrite.reset();
                   }}
-                  disabled={isBusy}
+                  disabled={isBusy || item === collateralAsset}
                 >
                   <TokenIcon symbol={item} size={20} />
                   {item}

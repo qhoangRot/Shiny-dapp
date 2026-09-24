@@ -2035,6 +2035,17 @@ html, body {
   background: rgba(155, 93, 229, 0.08);
 }
 
+.asset-toggle__btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.asset-toggle__btn:disabled:hover {
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.02);
+}
+
 .tier-toggle__label {
   font-weight: 600;
   font-size: 0.88rem;

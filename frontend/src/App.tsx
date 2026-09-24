@@ -187,7 +187,9 @@ function App() {
 
   const goApp = useCallback(() => {
     navigateAppView('app');
-    if (window.location.pathname === '/docs') window.history.pushState({}, '', '/');
+    if (window.location.pathname !== '/' || window.location.hash) {
+      window.history.replaceState({}, '', '/');
+    }
   }, [navigateAppView]);
 
   const launchApp = useCallback(() => {
