@@ -11,6 +11,7 @@ type Asset = 'USDC' | 'EURC';
 
 const BPS_DENOMINATOR = 10_000;
 const SECONDS_PER_YEAR = 31_536_000;
+const MIN_PREVIEW_HEALTH_FACTOR = 1.2;
 
 function parseTokenAmount(value: string) {
   if (!value || !/^\d*(?:\.\d{0,6})?$/.test(value)) return 0n;
@@ -109,6 +110,7 @@ export function BorrowDrawer({
           { address: V2_CONTRACTS.lendingPool, abi: lendingPoolV2Abi, functionName: 'isEligibleCollateralForDebt', args: [CONTRACTS.eurc, CONTRACTS.eurc] },
           { address: V2_CONTRACTS.oracleAdapter, abi: oracleAdapterV2Abi, functionName: 'isHealthy', args: [CONTRACTS.usdc] },
           { address: V2_CONTRACTS.oracleAdapter, abi: oracleAdapterV2Abi, functionName: 'isHealthy', args: [CONTRACTS.eurc] },
+          { address: V2_CONTRACTS.lendingPool, abi: lendingPoolV2Abi, functionName: 'availableLiquidity', args: [assetAddress] },
         ]
       : [],
     query: { enabled: !!address && open },
@@ -220,6 +222,7 @@ export function BorrowDrawer({
   const eurcForUsdc = data[10]?.result === true;
   const eurcForEurc = data[11]?.result === true;
   const oracleAvailable = data[12]?.result === true && data[13]?.result === true;
+  const poolAvailableLiquidity = Number(formatUnits((data[14]?.result as bigint) ?? 0n, 6));
   const eurcUsdPrice = TESTNET_ORACLE.initialPrice;
 
   const usdcDebt = usdcLoan ? Number(formatUnits(usdcLoan[0] + usdcLoan[1] + usdcLoan[2], 6)) : 0;
@@ -255,20 +258,27 @@ export function BorrowDrawer({
   const currentLtvBps = totalCollateralUsd > 0 ? (totalDebtUsd * BPS_DENOMINATOR) / totalCollateralUsd : 0;
   const projectedLtvBps = totalCollateralUsd > 0 ? (newDebtUsd * BPS_DENOMINATOR) / totalCollateralUsd : Infinity;
   const remainingBorrowUsd = Math.max(0, (totalCollateralUsd * maxLtvBps) / BPS_DENOMINATOR - totalDebtUsd);
-  const maxBorrowInAsset =
+  const remainingBorrowAtHealthBufferUsd = Math.max(
+    0,
+    (totalCollateralUsd * liquidationThresholdBps) / BPS_DENOMINATOR / MIN_PREVIEW_HEALTH_FACTOR - totalDebtUsd,
+  );
+  const safeRemainingBorrowUsd = Math.min(remainingBorrowUsd, remainingBorrowAtHealthBufferUsd);
+  const maxBorrowByRisk =
     asset === 'EURC'
       ? oracleAvailable
-        ? remainingBorrowUsd / eurcUsdPrice
+        ? safeRemainingBorrowUsd / eurcUsdPrice
         : 0
-      : remainingBorrowUsd;
+      : safeRemainingBorrowUsd;
+  const maxBorrowInAsset = Math.min(maxBorrowByRisk, poolAvailableLiquidity);
   const borrowApr = secondsRateToApr(ratePerSecond);
 
   const noCollateral = totalCollateralUsd === 0;
   const noSelectedCollateral = selectedCollateralAmount === 0;
   const exceedsMaxLtv = borrowAmountUsd > 0 && projectedLtvBps > maxLtvBps;
-  const lowHealthFactor = borrowAmountUsd > 0 && hfAfter < 1.2;
+  const exceedsPoolLiquidity = borrowAmount > poolAvailableLiquidity;
+  const lowHealthFactor = borrowAmountUsd > 0 && hfAfter < MIN_PREVIEW_HEALTH_FACTOR;
   const isValidAmount = oracleAvailable && borrowPairEnabled && collateralAsset !== asset
-    && amountWei > 0n && !noCollateral && !noSelectedCollateral && !exceedsMaxLtv && !lowHealthFactor;
+    && amountWei > 0n && !noCollateral && !noSelectedCollateral && !exceedsMaxLtv && !exceedsPoolLiquidity && !lowHealthFactor;
   const success = borrowTx.isSuccess;
 
   const helperText = !oracleAvailable
@@ -281,6 +291,8 @@ export function BorrowDrawer({
       ? 'Stake or deposit collateral before borrowing.'
     : exceedsMaxLtv
       ? `This borrow would exceed Max LTV (${(maxLtvBps / 100).toFixed(0)}%).`
+      : exceedsPoolLiquidity
+        ? `The pool currently has only ${poolAvailableLiquidity.toFixed(2)} ${asset} available to lend.`
       : lowHealthFactor
         ? 'Health Factor would be too close to liquidation. Try a smaller amount.'
         : amountWei === 0n
@@ -467,9 +479,9 @@ export function BorrowDrawer({
             </div>
           </div>
 
-          <p className={`borrow-helper ${!oracleAvailable || noCollateral || noSelectedCollateral || exceedsMaxLtv || lowHealthFactor ? 'borrow-helper--danger' : ''}`}>
+          <p className={`borrow-helper ${!oracleAvailable || noCollateral || noSelectedCollateral || exceedsMaxLtv || exceedsPoolLiquidity || lowHealthFactor ? 'borrow-helper--danger' : ''}`}>
             <span className="borrow-helper__icon" aria-hidden="true">
-              {!oracleAvailable || noCollateral || noSelectedCollateral || exceedsMaxLtv || lowHealthFactor ? '!' : 'i'}
+              {!oracleAvailable || noCollateral || noSelectedCollateral || exceedsMaxLtv || exceedsPoolLiquidity || lowHealthFactor ? '!' : 'i'}
             </span>
             <span>{helperText}</span>
           </p>
